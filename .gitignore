@@ -1,0 +1,7 @@
+/target
+.env
+
+# local network captures — may contain auth cookies
+/high
+/std
+*.curl
