@@ -2,6 +2,7 @@
 name = "colab-cli"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [[bin]]
 name = "colab"
@@ -34,6 +35,11 @@ dirs = "5"
 thiserror = "2"
 url = "2"
 dotenvy = "0.15"
+
+# Compile-time string obfuscation for build-time embedded OAuth credentials.
+# XORs literals with a randomized compile-time key so they never appear as
+# plaintext in the binary's .rodata section.
+obfstr = "0.4"
 
 # WebSocket (terminal)
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }

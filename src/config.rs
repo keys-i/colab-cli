@@ -74,10 +74,16 @@ impl ColabConfig {
             .or(file.colab_domain)
             .unwrap_or_else(|| environment.colab_domain().to_string());
 
+        // Resolution order: runtime env > config.toml > build-time embedded.
+        // Release binaries built via CI ship with non-empty embedded values,
+        // so end users don't need to configure anything. Developers building
+        // locally without the env vars set will see empty embedded values and
+        // must supply credentials via env or config.toml as before.
         let client_id = std::env::var("COLAB_EXTENSION_CLIENT_ID")
             .ok()
-            .or(file.client_id)
-            .unwrap_or_default();
+            .filter(|s| !s.is_empty())
+            .or_else(|| file.client_id.filter(|s| !s.is_empty()))
+            .unwrap_or_else(crate::embedded::embedded_client_id);
 
         if client_id.is_empty() {
             return Err(ColabError::config(
@@ -87,8 +93,9 @@ impl ColabConfig {
 
         let client_secret = std::env::var("COLAB_EXTENSION_CLIENT_NOT_SO_SECRET")
             .ok()
-            .or(file.client_secret)
-            .unwrap_or_default();
+            .filter(|s| !s.is_empty())
+            .or_else(|| file.client_secret.filter(|s| !s.is_empty()))
+            .unwrap_or_else(crate::embedded::embedded_client_secret);
 
         if client_secret.is_empty() {
             return Err(ColabError::config(
