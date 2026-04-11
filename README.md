@@ -32,10 +32,10 @@ and run arbitrary commands — all without ever opening a notebook tab.
 | --- | --- |
 | **Auth** | Browser-based Google OAuth, securely cached credentials, auto-refresh |
 | **Servers** | Assign / reconfigure / list / remove CPU, GPU, and TPU runtimes |
-| **Shell** | Full interactive PTY shell over WebSockets (`colab server shell`) |
+| **Shell** | Full interactive PTY shell over WebSockets (`colab-cli server shell`) |
 | **Run** | Stream stdout/stderr from arbitrary remote commands with real exit codes |
 | **Files** | Upload local files, plus passthrough `ls` / `cp` / `rm` on the runtime |
-| **Monitor** | Realtime CPU / RAM / disk / GPU stats via `colab server ps` |
+| **Monitor** | Realtime CPU / RAM / disk / GPU stats via `colab-cli server ps` |
 | **Keepalive** | `-k` flag on `assign` / `reconfigure` keeps the runtime warm indefinitely |
 | **Completions** | First-class bash / zsh / fish / PowerShell / elvish completions |
 
@@ -45,25 +45,30 @@ and run arbitrary commands — all without ever opening a notebook tab.
 
 ### 1. Install
 
-Grab a prebuilt binary from the [latest release](https://github.com/keys-i/colab-cli/releases/latest)
-for your platform, unpack it, and drop the `colab` binary somewhere on your
-`PATH`:
+**One-liner (macOS / Linux):**
 
-```bash
-# Linux x86_64 example
-tar -xzf colab-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
-install -m 0755 colab-vX.Y.Z-x86_64-unknown-linux-gnu/colab ~/.local/bin/
+```sh
+curl -fsSL https://raw.githubusercontent.com/keys-i/colab-cli/main/install.sh | sh
 ```
 
-Release binaries ship with OAuth credentials baked in at build time, so you
-can skip straight to step 2. If you'd rather build from source, see
-[Build from source](#build-from-source) — you'll need to provide your own
-OAuth client.
+The script installs `cargo` via rustup if needed, then runs
+`cargo install colab-cli --locked`. The crate published to crates.io has OAuth
+credentials baked in at build time, so the resulting binary works out of the
+box — no `.env`, no `config.toml`, nothing to set up.
+
+**Manual (any platform with Rust):**
+
+```sh
+cargo install colab-cli --locked
+```
+
+**Building from a git checkout** is a different story — you'll need to provide
+your own OAuth client. See [Build from source](#build-from-source).
 
 ### 2. Sign in
 
 ```bash
-colab auth login
+colab-cli auth login
 ```
 
 Your browser opens, you approve the scopes, and credentials are cached in your
@@ -73,13 +78,13 @@ OS data directory.
 
 ```bash
 # Interactive picker (variant + accelerator)
-colab server assign
+colab-cli server assign
 
 # Or non-interactively:
-colab server assign --variant gpu --accelerator T4 --high-ram -k
+colab-cli server assign --variant gpu --accelerator T4 --high-ram -k
 
 # Drop into a real shell on the runtime
-colab server shell
+colab-cli server shell
 ```
 
 That's it — you're in Colab, from your terminal.
@@ -88,45 +93,45 @@ That's it — you're in Colab, from your terminal.
 
 ## Usage
 
-All commands are available under `colab <group> <command>`. Run any subcommand
-with `--help` for full flag docs.
+All commands are available under `colab-cli <group> <command>`. Run any
+subcommand with `--help` for full flag docs.
 
 ### Auth
 
 ```bash
-colab auth login        # sign in via browser
-colab auth logout       # clear stored credentials
+colab-cli auth login        # sign in via browser
+colab-cli auth logout       # clear stored credentials
 ```
 
 ### Servers
 
 ```bash
-colab server assign [--variant cpu|gpu|tpu] [-a T4] [--high-ram] [-k]
-colab server reconfigure [--name NAME] [--variant ...] [-a ...] [--high-ram] [-k]
-colab server ls                 # list assigned servers
-colab server ls --available     # show available accelerators + CCU/hr rates
-colab server info [--name NAME] # server + account details
-colab server ps [--interval 1000]   # live CPU / RAM / disk / GPU stats
-colab server shell [--name NAME]    # interactive PTY shell
-colab server run  [--name NAME] -- python -V
-colab server rm   [--name NAME]
+colab-cli server assign [--variant cpu|gpu|tpu] [-a T4] [--high-ram] [-k]
+colab-cli server reconfigure [--name NAME] [--variant ...] [-a ...] [--high-ram] [-k]
+colab-cli server ls                 # list assigned servers
+colab-cli server ls --available     # show available accelerators + CCU/hr rates
+colab-cli server info [--name NAME] # server + account details
+colab-cli server ps [--interval 1000]   # live CPU / RAM / disk / GPU stats
+colab-cli server shell [--name NAME]    # interactive PTY shell
+colab-cli server run  [--name NAME] -- python -V
+colab-cli server rm   [--name NAME]
 ```
 
 Examples:
 
 ```bash
-colab server run --name "Colab GPU" nvidia-smi
-colab server run -- bash -lc 'pip install torch && python train.py'
+colab-cli server run --name "Colab GPU" nvidia-smi
+colab-cli server run -- bash -lc 'pip install torch && python train.py'
 ```
 
 ### Files
 
 ```bash
-colab file upload ./dataset.csv /content/dataset.csv
-colab file ls                        # defaults to `ls -lah /content`
-colab file ls -- -lah /tmp
-colab file cp -- -r /content/a /content/b
-colab file rm -- -rf /content/junk
+colab-cli file upload ./dataset.csv /content/dataset.csv
+colab-cli file ls                        # defaults to `ls -lah /content`
+colab-cli file ls -- -lah /tmp
+colab-cli file cp -- -r /content/a /content/b
+colab-cli file rm -- -rf /content/junk
 ```
 
 Anything after `--` is forwarded verbatim to the remote `ls` / `cp` / `rm`.
@@ -215,15 +220,15 @@ cargo build
 cargo build --release
 ```
 
-The release binary lands at `target/release/colab`.
+The release binary lands at `target/release/colab-cli`.
 
 ### Install locally
 
 ```bash
-cargo install --path .
+cargo install --path . --locked
 ```
 
-This compiles a release build and installs `colab` into `~/.cargo/bin`.
+This compiles a release build and installs `colab-cli` into `~/.cargo/bin`.
 
 ### Run the test suite
 
@@ -247,6 +252,13 @@ cargo clippy --all-targets      # lints
 cargo fmt                       # format
 ```
 
+> Note: `build.rs` writes a generated `src/embedded.rs` containing the
+> obfuscated OAuth credentials. The file is gitignored. CI populates it via
+> the `COLAB_EXTENSION_CLIENT_ID` / `COLAB_EXTENSION_CLIENT_NOT_SO_SECRET`
+> repo secrets before `cargo publish`, and `package.include` forces the
+> populated file into the published `.crate` so end users get a working
+> binary out of `cargo install`.
+
 ---
 
 ## Shell completions
@@ -255,16 +267,16 @@ Generate completions for your shell and source them:
 
 ```bash
 # Bash
-colab completions bash > ~/.local/share/bash-completion/completions/colab
+colab-cli completions bash > ~/.local/share/bash-completion/completions/colab-cli
 
 # Zsh (anywhere on $fpath)
-colab completions zsh > ~/.zfunc/_colab
+colab-cli completions zsh > ~/.zfunc/_colab-cli
 
 # Fish
-colab completions fish > ~/.config/fish/completions/colab.fish
+colab-cli completions fish > ~/.config/fish/completions/colab-cli.fish
 
 # PowerShell
-colab completions powershell | Out-String | Invoke-Expression
+colab-cli completions powershell | Out-String | Invoke-Expression
 ```
 
 ---
@@ -272,9 +284,11 @@ colab completions powershell | Out-String | Invoke-Expression
 ## Troubleshooting
 
 **`COLAB_EXTENSION_CLIENT_ID is not set`**
-You haven't provided OAuth credentials. See [Configuration](#configuration).
+You're running a binary built from a fresh git checkout without your own OAuth
+client. Either install via `cargo install colab-cli --locked` (credentials are
+baked into the published crate), or follow [Build from source](#build-from-source).
 
-**`colab auth login` hangs / browser doesn't open**
+**`colab-cli auth login` hangs / browser doesn't open**
 The OAuth flow spins up a local loopback listener. Make sure nothing else is
 bound to the loopback port it prints, and that your firewall allows local
 connections.
@@ -284,8 +298,8 @@ Colab aggressively recycles idle runtimes. Pass `-k` / `--keepalive` to
 `assign` or `reconfigure` to keep the session warm via periodic pings and
 automatic token refresh.
 
-**`colab server shell` renders garbled output**
-Your terminal's `TERM` is probably unusual. Try `TERM=xterm-256color colab server shell`.
+**`colab-cli server shell` renders garbled output**
+Your terminal's `TERM` is probably unusual. Try `TERM=xterm-256color colab-cli server shell`.
 
 ---
 

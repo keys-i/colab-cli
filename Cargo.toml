@@ -1,11 +1,29 @@
 [package]
 name = "colab-cli"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2024"
+rust-version = "1.85"
+authors = ["Keys <70819367+keys-i@users.noreply.github.com>"]
+description = "Google Colab from the terminal — manage CPU/GPU/TPU runtimes, open interactive shells, and stream files, straight from your shell."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/keys-i/colab-cli"
+homepage = "https://github.com/keys-i/colab-cli"
+keywords = ["colab", "google", "cli", "jupyter", "gpu"]
+categories = ["command-line-utilities", "development-tools"]
 build = "build.rs"
+include = [
+    "src/**/*.rs",
+    "benches/**/*.rs",
+    "build.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "LICENSE*",
+    "README.md",
+]
 
 [[bin]]
-name = "colab"
+name = "colab-cli"
 path = "src/main.rs"
 
 [dependencies]
@@ -36,9 +54,6 @@ thiserror = "2"
 url = "2"
 dotenvy = "0.15"
 
-# Compile-time string obfuscation for build-time embedded OAuth credentials.
-# XORs literals with a randomized compile-time key so they never appear as
-# plaintext in the binary's .rodata section.
 obfstr = "0.4"
 
 # WebSocket (terminal)

@@ -23,10 +23,10 @@ async fn main() {
 
         match &e {
             ColabError::NotAuthenticated => {
-                eprintln!("  Run `colab auth login` to sign in.");
+                eprintln!("  Run `colab-cli auth login` to sign in.");
             }
             ColabError::TooManyAssignments => {
-                eprintln!("  Run `colab server rm` to remove one.");
+                eprintln!("  Run `colab-cli server rm` to remove one.");
             }
             _ => {}
         }
@@ -38,7 +38,7 @@ async fn main() {
 async fn run(cli: Cli, ui: Ui) -> Result<()> {
     if let Commands::Completions { shell } = &cli.command {
         let mut cmd = Cli::command();
-        clap_complete::generate(*shell, &mut cmd, "colab", &mut std::io::stdout());
+        clap_complete::generate(*shell, &mut cmd, "colab-cli", &mut std::io::stdout());
         return Ok(());
     }
 

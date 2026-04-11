@@ -5,194 +5,31 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g. v0.1.0)"
-        required: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  BIN_NAME: colab
 
 jobs:
-  create-release:
-    name: Create draft release
+  publish-crate:
+    name: Publish to crates.io
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v5
-      - id: tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            exit 0
-          fi
-
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --generate-notes \
-            --draft
-
-          generated=$(gh release view "$TAG" --json body -q .body)
-          install_notes=$(cat <<'EOF'
-          ## Install
-
-          Binaries are published directly — no tarball, no extraction.
-          Source code is attached as auto-generated zip/tar.gz below.
-
-          ### macOS (Apple Silicon)
-
-          The binary is ad-hoc codesigned in CI but not Developer-ID signed,
-          so browser downloads will get quarantined by Gatekeeper. Install
-          via `curl` to skip the quarantine attribute entirely:
-
-          ```sh
-          curl -Lo colab https://github.com/${{ github.repository }}/releases/download/TAG/colab-TAG-aarch64-apple-darwin
-          chmod +x colab
-          sudo mv colab /usr/local/bin/
-          ```
-
-          Intel Macs: replace `aarch64-apple-darwin` with `x86_64-apple-darwin`.
-
-          If you downloaded via browser and macOS says the binary is
-          "damaged" or "cannot be verified", clear quarantine:
-
-          ```sh
-          xattr -cr ./colab
-          ```
-
-          ### Linux
-
-          ```sh
-          curl -Lo colab https://github.com/${{ github.repository }}/releases/download/TAG/colab-TAG-x86_64-unknown-linux-gnu
-          chmod +x colab
-          install -m 0755 colab ~/.local/bin/
-          ```
-
-          ARM64: replace `x86_64-unknown-linux-gnu` with `aarch64-unknown-linux-gnu`.
-
-          ### Windows
-
-          Download `colab-TAG-x86_64-pc-windows-msvc.exe`, rename to
-          `colab.exe`, and put it on your `PATH`.
-
-          ---
-
-          EOF
-          )
-          install_notes=${install_notes//TAG/$TAG}
-
-          printf '%s\n%s' "$install_notes" "$generated" \
-            | gh release edit "$TAG" --notes-file -
-
-  build:
-    name: build (${{ matrix.target }})
-    needs: create-release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            ext: .exe
     steps:
       - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
 
-      - name: Install cross-compilation toolchain
-        if: matrix.cross
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          mkdir -p .cargo
-          cat >> .cargo/config.toml <<'EOF'
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          EOF
-
-      - name: Build
+      - name: Bake credentials into src/embedded.rs
         env:
           COLAB_EXTENSION_CLIENT_ID: ${{ secrets.COLAB_EXTENSION_CLIENT_ID }}
           COLAB_EXTENSION_CLIENT_NOT_SO_SECRET: ${{ secrets.COLAB_EXTENSION_CLIENT_NOT_SO_SECRET }}
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked
 
-      - name: Ad-hoc codesign (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          bin="target/${{ matrix.target }}/release/${BIN_NAME}"
-          xattr -cr "$bin"
-          codesign --force --sign - "$bin"
-          codesign -dv "$bin" 2>&1 | head -5 || true
-
-      - name: Stage binary
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${{ needs.create-release.outputs.tag }}"
-          src="target/${{ matrix.target }}/release/${BIN_NAME}${{ matrix.ext }}"
-          out="dist/${BIN_NAME}-${tag}-${{ matrix.target }}${{ matrix.ext }}"
-          mkdir -p dist
-          cp "$src" "$out"
-          echo "ASSET=$out" >> "$GITHUB_ENV"
-
-      - name: Generate checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$ASSET" > "$ASSET.sha256"
-          else
-            shasum -a 256 "$ASSET" > "$ASSET.sha256"
-          fi
-
-      - name: Upload to release
+      - name: cargo publish
         env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          gh release upload "${{ needs.create-release.outputs.tag }}" \
-            "$ASSET" "$ASSET.sha256" --clobber
-
-  publish-release:
-    name: Publish release
-    needs: [create-release, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Mark release as published
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "${{ needs.create-release.outputs.tag }}" --draft=false
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked --allow-dirty

@@ -98,7 +98,7 @@ impl Ui {
             println!(
                 "{} Not signed in. Run {} to authenticate.",
                 "\u{00b7}".dimmed(),
-                "colab auth login".cyan().bold()
+                "colab-cli auth login".cyan().bold()
             );
         }
     }
@@ -111,7 +111,7 @@ impl Ui {
                 println!(
                     "{} No servers assigned. Run {} to assign one.",
                     "\u{00b7}".dimmed(),
-                    "colab server assign".cyan().bold()
+                    "colab-cli server assign".cyan().bold()
                 );
             }
             return;

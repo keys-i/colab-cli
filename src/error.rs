@@ -2,7 +2,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ColabError {
-    #[error("not authenticated \u{2014} run `colab login` first")]
+    #[error("not authenticated \u{2014} run `colab-cli auth login` first")]
     NotAuthenticated,
 
     #[error("authentication failed: {0}")]

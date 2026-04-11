@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "colab",
+    name = "colab-cli",
     about = "Google Colab from the terminal",
     version,
     disable_help_subcommand = true
@@ -119,9 +119,9 @@ pub enum ServerCommands {
     /// and the remote exit status is propagated as this command's exit code.
     ///
     /// Examples:
-    ///     colab server run --name "Colab CPU" python -V
-    ///     colab server run ls -la /content
-    ///     colab server run bash -lc 'echo hi && uname -a'
+    ///     colab-cli server run --name "Colab CPU" python -V
+    ///     colab-cli server run ls -la /content
+    ///     colab-cli server run bash -lc 'echo hi && uname -a'
     Run {
         #[arg(long)]
         name: Option<String>,
@@ -144,9 +144,9 @@ pub enum FileCommands {
     /// List files on the runtime (passes args through to remote `ls`)
     ///
     /// Examples:
-    ///     colab file ls
-    ///     colab file ls -lah /content
-    ///     colab file ls --name "Colab CPU" -a /tmp
+    ///     colab-cli file ls
+    ///     colab-cli file ls -lah /content
+    ///     colab-cli file ls --name "Colab CPU" -a /tmp
     Ls {
         #[arg(long)]
         name: Option<String>,
@@ -158,8 +158,8 @@ pub enum FileCommands {
     /// Copy files on the runtime (passes args through to remote `cp`)
     ///
     /// Examples:
-    ///     colab file cp /content/foo /content/bar
-    ///     colab file cp -r /content/dir /content/dir2
+    ///     colab-cli file cp /content/foo /content/bar
+    ///     colab-cli file cp -r /content/dir /content/dir2
     Cp {
         #[arg(long)]
         name: Option<String>,
@@ -171,8 +171,8 @@ pub enum FileCommands {
     /// Remove files on the runtime (passes args through to remote `rm`)
     ///
     /// Examples:
-    ///     colab file rm /content/foo.txt
-    ///     colab file rm -rf /content/junk
+    ///     colab-cli file rm /content/foo.txt
+    ///     colab-cli file rm -rf /content/junk
     Rm {
         #[arg(long)]
         name: Option<String>,
@@ -224,8 +224,8 @@ mod tests {
 
     #[test]
     fn help_subcommand_is_disabled() {
-        let Err(err) = Cli::try_parse_from(["colab", "help"]) else {
-            panic!("`colab help` should not parse");
+        let Err(err) = Cli::try_parse_from(["colab-cli", "help"]) else {
+            panic!("`colab-cli help` should not parse");
         };
         assert!(matches!(
             err.kind(),
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn ls_available_flag_parses() {
-        let cli = Cli::try_parse_from(["colab", "server", "ls", "--available"]).unwrap();
+        let cli = Cli::try_parse_from(["colab-cli", "server", "ls", "--available"]).unwrap();
         if let Commands::Server {
             command: ServerCommands::Ls { available },
         } = cli.command
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn assign_keepalive_and_high_ram_flags_parse() {
         let cli = Cli::try_parse_from([
-            "colab",
+            "colab-cli",
             "server",
             "assign",
             "-k",
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn reconfigure_parses() {
         let cli = Cli::try_parse_from([
-            "colab",
+            "colab-cli",
             "server",
             "reconfigure",
             "--name",
@@ -315,17 +315,17 @@ mod tests {
 
     #[test]
     fn no_standalone_keepalive_command() {
-        assert!(Cli::try_parse_from(["colab", "server", "keepalive"]).is_err());
+        assert!(Cli::try_parse_from(["colab-cli", "server", "keepalive"]).is_err());
     }
 
     #[test]
     fn no_standalone_accelerators_command() {
-        assert!(Cli::try_parse_from(["colab", "server", "accelerators"]).is_err());
+        assert!(Cli::try_parse_from(["colab-cli", "server", "accelerators"]).is_err());
     }
 
     #[test]
     fn ps_interval_parses() {
-        let cli = Cli::try_parse_from(["colab", "server", "ps", "--interval", "250"]).unwrap();
+        let cli = Cli::try_parse_from(["colab-cli", "server", "ps", "--interval", "250"]).unwrap();
         if let Commands::Server {
             command: ServerCommands::Ps { interval, .. },
         } = cli.command
