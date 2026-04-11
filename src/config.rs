@@ -74,11 +74,6 @@ impl ColabConfig {
             .or(file.colab_domain)
             .unwrap_or_else(|| environment.colab_domain().to_string());
 
-        // Resolution order: runtime env > config.toml > build-time embedded.
-        // Release binaries built via CI ship with non-empty embedded values,
-        // so end users don't need to configure anything. Developers building
-        // locally without the env vars set will see empty embedded values and
-        // must supply credentials via env or config.toml as before.
         let client_id = std::env::var("COLAB_EXTENSION_CLIENT_ID")
             .ok()
             .filter(|s| !s.is_empty())
