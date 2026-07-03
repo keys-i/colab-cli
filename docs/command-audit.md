@@ -33,4 +33,14 @@ This pass removed old public command spaces from normal help and kept hidden ali
 | `runtime_info` | `runtime.info` | skill registry, tools docs | internal alias only | Skill names describe the action, not the old command space. |
 | `doctor` skill | `status.check` | skill registry, tools docs | internal alias only | Health checks moved under status. |
 
+## Drive Mount Fix
+
+`mount drive` is now only a hidden migration path. It prints:
+
+```text
+moved: use `colab-cli fs drive mount`
+```
+
+The implementation lives behind `fs drive mount`. It runs `google.colab.drive.mount()` through a Colab kernel cell. It no longer calls the helper from a plain remote `python -c` process, because that process has no IPython kernel and fails with `NoneType`/`kernel` tracebacks.
+
 `auth`, `agent`, `bug-report`, `server`, `file`, and shell completions are hidden from top-level help. They remain parseable because there is no smaller replacement for every existing flow yet.

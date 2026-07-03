@@ -55,6 +55,9 @@ colab-cli fs sync ./src /content/src --dry-run
 colab-cli fs changed ./src /content/src
 
 colab-cli fs drive mount --session trainer --path /content/drive
+colab-cli fs drive status --session trainer
+colab-cli fs drive list --session trainer
+colab-cli fs drive unmount --session trainer
 colab-cli run install torch transformers --session trainer
 colab-cli status runtime --backend
 colab-cli status runtime --fit llama-7b
@@ -125,6 +128,9 @@ Research notes live in [docs/research.md](docs/research.md). The current build p
 - [Refactor map](docs/refactor-map.md)
 - [Prune report](docs/prune-report.md)
 - [Command audit](docs/command-audit.md)
+- [Drive](docs/drive.md)
+- [Feature test plan](docs/feature-test-plan.md)
+- [Live testing](docs/live-testing.md)
 - [Easter eggs](docs/easter-eggs.md)
 - [Continuation](docs/continuation.md)
 - [Tools](docs/tools.md)

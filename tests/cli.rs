@@ -13,7 +13,9 @@ fn parses_major_command_spaces() {
         ["colab-cli", "run", "install", "torch"].as_slice(),
         ["colab-cli", "fs", "changed", ".", "/content"].as_slice(),
         ["colab-cli", "fs", "drive", "mount"].as_slice(),
+        ["colab-cli", "fs", "drive", "mount", "--timeout", "120"].as_slice(),
         ["colab-cli", "fs", "drive", "status"].as_slice(),
+        ["colab-cli", "fs", "drive", "list"].as_slice(),
         ["colab-cli", "status", "runtime", "--gpu"].as_slice(),
         ["colab-cli", "status", "runtime", "--tpu"].as_slice(),
         ["colab-cli", "status", "runtime", "--versions"].as_slice(),
@@ -26,7 +28,6 @@ fn parses_major_command_spaces() {
         ["colab-cli", "continue", "last"].as_slice(),
         ["colab-cli", "settings", "path"].as_slice(),
         ["colab-cli", "settings", "locate"].as_slice(),
-        ["colab-cli", "release", "name", "v0.4.2"].as_slice(),
     ] {
         Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
     }
@@ -38,12 +39,21 @@ fn top_level_help_has_final_command_spaces() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     for name in [
-        "session", "run", "fs", "status", "continue", "slurp", "fleet", "settings", "release",
+        "session",
+        "run",
+        "fs",
+        "status",
+        "continue",
+        "slurp",
+        "fleet",
+        "auth",
+        "settings",
+        "completions",
     ] {
         assert!(stdout.contains(name), "{name}");
     }
     for old in [
-        "exec", "env", "mount", "runtime", "tools", "config", "doctor",
+        "exec", "env", "mount", "runtime", "tools", "config", "doctor", "release", "agent",
     ] {
         assert!(!stdout.contains(&format!("  {old}")), "{old}");
     }
@@ -58,6 +68,7 @@ fn hidden_aliases_parse_for_one_cycle() {
         ["colab-cli", "config", "path"].as_slice(),
         ["colab-cli", "env", "install", "torch"].as_slice(),
         ["colab-cli", "exec", "py", "--code", "print(1)"].as_slice(),
+        ["colab-cli", "mount", "drive"].as_slice(),
     ] {
         Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
     }
@@ -88,6 +99,9 @@ fn docs_exist() {
         "docs/easter-eggs.md",
         "docs/research.md",
         "docs/command-audit.md",
+        "docs/drive.md",
+        "docs/feature-test-plan.md",
+        "docs/live-testing.md",
         "plan.md",
     ] {
         assert!(std::path::Path::new(path).exists(), "{path}");

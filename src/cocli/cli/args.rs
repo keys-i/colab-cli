@@ -74,18 +74,17 @@ pub enum Commands {
         command: SettingsCommands,
     },
     /// release metadata and maintainer helpers
+    #[command(hide = true)]
     Release {
         #[command(subcommand)]
         command: ReleaseCommands,
     },
     /// Authentication
-    #[command(hide = true)]
     Auth {
         #[command(subcommand)]
         command: AuthCommands,
     },
     /// Generate shell completions
-    #[command(hide = true)]
     Completions { shell: clap_complete::Shell },
 
     /// Write a redacted diagnostic bundle
@@ -443,6 +442,10 @@ pub enum FsDriveCommands {
         path: String,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        #[arg(long)]
+        open: bool,
     },
     /// Show Drive mount state
     Status {
@@ -450,6 +453,11 @@ pub enum FsDriveCommands {
         session: Option<String>,
         #[arg(long)]
         dry_run: bool,
+    },
+    /// List files under the Drive mount path
+    List {
+        #[arg(long, short = 's')]
+        session: Option<String>,
     },
     /// Unmount Google Drive
     Unmount {
@@ -505,6 +513,12 @@ pub enum MountCommands {
         session: Option<String>,
         #[arg(long, default_value = "/content/drive")]
         path: String,
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        #[arg(long)]
+        open: bool,
+        #[arg(long)]
+        dry_run: bool,
     },
     /// List known mounts
     List {

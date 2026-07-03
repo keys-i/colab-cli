@@ -6,7 +6,7 @@ Command shape:
 colab-cli <space> <command> <flags>
 ```
 
-Public spaces: `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `settings`, `release`.
+Public spaces: `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `auth`, `settings`, `completions`.
 
 Hidden aliases exist for one migration cycle where they are cheap. They do not appear in normal help.
 
@@ -51,10 +51,18 @@ colab-cli fs diff ./src /content/src
 colab-cli fs changed ./src /content/src
 colab-cli fs drive mount --session trainer --path /content/drive
 colab-cli fs drive status --session trainer
+colab-cli fs drive list --session trainer
+colab-cli fs drive unmount --session trainer
 colab-cli fs drive path --session trainer
 ```
 
 `fs rm` requires `--yes`. `fs sync` is dry-run planning in this release.
+
+Drive mount runs through a Colab kernel cell. If the session has not been opened in a browser yet, run:
+
+```sh
+colab-cli session url --session trainer --open
+```
 
 ## Status
 

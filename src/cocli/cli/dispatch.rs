@@ -35,25 +35,107 @@ pub async fn main_entry() {
     colored::control::set_override(use_color);
     let ring_bell =
         config::terminal_bell_allowed(cli.bell, std::env::var_os("CI").is_some(), cli.quiet);
-    let ui = Ui::new(cli.quiet);
+    let json_mode = cli.json;
+    let verbose = cli.verbose;
+    let ui = Ui::new(cli.quiet || cli.json);
 
     if let Err(e) = run(cli, ui).await {
-        ui.error(&e.to_string());
+        if json_mode {
+            print_error_json(&e, verbose);
+        } else {
+            ui.error(&e.to_string());
+            if let ColabError::Drive {
+                next_action, raw, ..
+            } = &e
+            {
+                if let Some(next) = next_action {
+                    eprintln!("  next: {next}");
+                }
+                if verbose && let Some(raw) = raw {
+                    eprintln!("\n{raw}");
+                }
+            }
+        }
         if ring_bell {
             eprint!("\x07");
         }
 
-        match &e {
-            ColabError::NotAuthenticated => {
-                eprintln!("  Run `colab-cli auth login` to sign in.");
+        if !json_mode {
+            match &e {
+                ColabError::NotAuthenticated => {
+                    eprintln!("  Run `colab-cli auth login` to sign in.");
+                }
+                ColabError::TooManyAssignments => {
+                    eprintln!("  Run `colab-cli session stop --name NAME` to remove one.");
+                }
+                _ => {}
             }
-            ColabError::TooManyAssignments => {
-                eprintln!("  Run `colab-cli session stop --name NAME` to remove one.");
-            }
-            _ => {}
         }
 
         std::process::exit(1);
+    }
+}
+
+fn print_error_json(e: &ColabError, verbose: bool) {
+    let error = match e {
+        ColabError::Drive {
+            kind,
+            message,
+            next_action,
+            raw,
+        } => {
+            let mut value = serde_json::json!({
+                "kind": kind,
+                "message": message,
+                "next_action": next_action,
+            });
+            if verbose && let Some(raw) = raw {
+                value["raw"] = serde_json::Value::String(raw.clone());
+            }
+            value
+        }
+        _ => serde_json::json!({
+            "kind": error_kind(e),
+            "message": e.to_string(),
+            "next_action": error_next_action(e),
+        }),
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "ok": false,
+            "error": error,
+        }))
+        .unwrap_or_else(|_| "{\"ok\":false}".to_string())
+    );
+}
+
+fn error_kind(e: &ColabError) -> &'static str {
+    match e {
+        ColabError::NotAuthenticated => "not_authenticated",
+        ColabError::AuthFailed(_) => "auth_failed",
+        ColabError::TokenRefreshFailed { .. } => "token_refresh_failed",
+        ColabError::ServerNotFound { .. } => "server_not_found",
+        ColabError::TooManyAssignments => "too_many_assignments",
+        ColabError::InsufficientQuota => "insufficient_quota",
+        ColabError::AccountDenylisted => "account_denylisted",
+        ColabError::ApiError { .. } => "api_error",
+        ColabError::ParseError(_) => "parse_error",
+        ColabError::Config(_) => "config_error",
+        ColabError::Drive { .. } => "drive_error",
+        ColabError::Io(_) => "io_error",
+        ColabError::Network(_) => "network_error",
+        ColabError::Json(_) => "json_error",
+        ColabError::TomlDe(_) | ColabError::TomlSer(_) => "toml_error",
+        ColabError::OAuth(_) => "oauth_error",
+    }
+}
+
+fn error_next_action(e: &ColabError) -> Option<&'static str> {
+    match e {
+        ColabError::NotAuthenticated => Some("colab-cli auth login"),
+        ColabError::TooManyAssignments => Some("colab-cli session stop --name NAME"),
+        _ => None,
     }
 }
 
@@ -85,9 +167,9 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_fs(command, &config, ui, json).await
         }
         Commands::Mount { command } => {
-            migration(&ui, "colab-cli fs drive ...");
+            migration(&ui, mount_migration_target(&command));
             let config = ColabConfig::load(cli.quiet)?;
-            handle_mount(command, &config, ui).await
+            handle_mount(command, &config, ui, json).await
         }
         Commands::Env { command } => {
             migration(&ui, "colab-cli run install/freeze/restore");
@@ -541,6 +623,8 @@ async fn handle_fs_drive(
             session,
             path,
             dry_run,
+            timeout,
+            open,
         } => {
             if dry_run {
                 return print_value(
@@ -549,11 +633,12 @@ async fn handle_fs_drive(
                         "action": "drive.mount",
                         "path": path,
                         "needs_session": true,
+                        "needs_kernel": true,
                         "would_execute": true
                     }),
                 );
             }
-            handle_mount(MountCommands::Drive { session, path }, config, ui).await
+            drive_mount(config, ui, json, session, path, timeout, open).await
         }
         FsDriveCommands::Status { session, dry_run } => {
             if dry_run {
@@ -566,12 +651,15 @@ async fn handle_fs_drive(
                     }),
                 );
             }
-            let code = "from pathlib import Path\np=Path('/content/drive')\nprint('mounted' if p.exists() and any(p.iterdir()) else 'not_mounted')".to_string();
-            handle_run(
+            let status = drive_status(config, ui, session, DEFAULT_DRIVE_PATH).await?;
+            print_drive_status(&status, json, ui)
+        }
+        FsDriveCommands::List { session } => {
+            handle_file_ls(
                 config,
                 ui,
                 session,
-                vec!["python".into(), "-c".into(), code],
+                vec!["-lah".to_string(), DEFAULT_DRIVE_PATH.to_string()],
             )
             .await
         }
@@ -586,38 +674,381 @@ async fn handle_fs_drive(
                     }),
                 );
             }
-            let code = "from google.colab import drive\ndrive.flush_and_unmount()".to_string();
-            handle_run(
-                config,
-                ui,
-                session,
-                vec!["python".into(), "-c".into(), code],
-            )
-            .await
+            drive_unmount(config, ui, json, session).await
         }
         FsDriveCommands::Path { .. } => {
-            println!("/content/drive");
+            println!("{DEFAULT_DRIVE_PATH}");
             Ok(())
         }
     }
 }
 
-async fn handle_mount(cmd: MountCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+async fn handle_mount(cmd: MountCommands, config: &ColabConfig, ui: Ui, json: bool) -> Result<()> {
     match cmd {
-        MountCommands::Drive { session, path } => {
-            let code = crate::cocli::runtime::drive_mount_python(&path);
-            handle_run(
-                config,
-                ui,
-                session,
-                vec!["python".into(), "-c".into(), code],
-            )
-            .await
+        MountCommands::Drive {
+            session,
+            path,
+            timeout,
+            open,
+            dry_run,
+        } => {
+            if dry_run {
+                return print_value(
+                    json,
+                    &serde_json::json!({
+                        "action": "drive.mount",
+                        "path": path,
+                        "needs_session": true,
+                        "needs_kernel": true,
+                        "would_execute": true
+                    }),
+                );
+            }
+            drive_mount(config, ui, json, session, path, timeout, open).await
         }
         MountCommands::List { session } => {
-            handle_run(config, ui, session, vec!["mount".into()]).await
+            let status = drive_status(config, ui, session, DEFAULT_DRIVE_PATH).await?;
+            print_drive_status(&status, json, ui)
         }
     }
+}
+
+const DEFAULT_DRIVE_PATH: &str = "/content/drive";
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct DriveStatus {
+    ok: bool,
+    mounted: Option<bool>,
+    path: String,
+    next_action: Option<String>,
+}
+
+async fn drive_mount(
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+    session: Option<String>,
+    path: String,
+    timeout_secs: u64,
+    open: bool,
+) -> Result<()> {
+    let status = drive_status(config, ui, session.clone(), &path).await?;
+    if status.mounted == Some(true) {
+        return print_drive_mount_success(json, &path, "Drive already mounted");
+    }
+
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session.as_deref())?;
+    let server = ensure_fresh_token(&manager, server, &ui).await?;
+
+    if open {
+        let url = crate::cocli::runtime::session_url(&config.colab_domain, &server.endpoint)
+            .map_err(|e| ColabError::config(e.to_string()))?;
+        open_url(&url)?;
+        ui.info("opened browser");
+    }
+
+    let timeout = std::time::Duration::from_secs(timeout_secs.max(1));
+    preflight_drive_kernel(manager.client(), &server, timeout).await?;
+
+    let output =
+        runner::execute_colab_cell(manager.client(), &server, &drive_mount_cell(&path), timeout)
+            .await?;
+    drive_output_to_result(&output)?;
+
+    if output.timed_out {
+        return Err(drive_approval_required(Some(output.raw_text())));
+    }
+
+    let after = drive_status(config, ui, session, &path).await?;
+    if after.mounted == Some(true) || drive_mount_output_looks_ok(&output.raw_text()) {
+        print_drive_mount_success(json, &path, "Drive mounted")
+    } else {
+        Err(ColabError::drive(
+            "drive_status_unknown",
+            "Could not confirm Drive status after mount",
+            Some("colab-cli fs drive status"),
+            Some(output.raw_text()),
+        ))
+    }
+}
+
+async fn drive_unmount(
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+    session: Option<String>,
+) -> Result<()> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session.as_deref())?;
+    let server = ensure_fresh_token(&manager, server, &ui).await?;
+    preflight_drive_kernel(
+        manager.client(),
+        &server,
+        std::time::Duration::from_secs(30),
+    )
+    .await?;
+
+    let output = runner::execute_colab_cell(
+        manager.client(),
+        &server,
+        "from google.colab import drive\ndrive.flush_and_unmount()",
+        std::time::Duration::from_secs(60),
+    )
+    .await?;
+    drive_output_to_result(&output)?;
+    if output.timed_out {
+        return Err(ColabError::drive(
+            "drive_unmount_timeout",
+            "Drive unmount did not finish before timeout",
+            Some("colab-cli fs drive status"),
+            Some(output.raw_text()),
+        ));
+    }
+    if json {
+        print_value(
+            true,
+            &serde_json::json!({
+                "ok": true,
+                "mounted": false,
+                "path": DEFAULT_DRIVE_PATH,
+                "next_action": null
+            }),
+        )
+    } else {
+        ui.success("Drive unmounted");
+        Ok(())
+    }
+}
+
+async fn drive_status(
+    config: &ColabConfig,
+    ui: Ui,
+    session: Option<String>,
+    path: &str,
+) -> Result<DriveStatus> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session.as_deref())?;
+    let server = ensure_fresh_token(&manager, server, &ui).await?;
+    let out = match runner::capture_remote_command(
+        manager.client(),
+        &server,
+        &drive_status_probe_command(path),
+    )
+    .await
+    {
+        Ok(out) => out,
+        Err(_) => {
+            return Ok(DriveStatus {
+                ok: false,
+                mounted: None,
+                path: path.to_string(),
+                next_action: Some("colab-cli status check".to_string()),
+            });
+        }
+    };
+    Ok(parse_drive_status(&out, path))
+}
+
+async fn preflight_drive_kernel(
+    client: &ColabClient,
+    server: &StoredServer,
+    timeout: std::time::Duration,
+) -> Result<()> {
+    let output =
+        runner::execute_colab_cell(client, server, drive_preflight_cell(), timeout).await?;
+    drive_output_to_result(&output)?;
+    if output.timed_out {
+        return Err(ColabError::drive(
+            "drive_kernel_timeout",
+            "Drive mount needs a responsive Colab kernel session",
+            Some("colab-cli session url --open"),
+            Some(output.raw_text()),
+        ));
+    }
+    if output.stdout.trim() == "true" {
+        Ok(())
+    } else {
+        Err(ColabError::drive(
+            "drive_kernel_context_required",
+            "Drive mount needs a Colab kernel session, not a plain Python process",
+            Some("colab-cli session url --open"),
+            Some(output.raw_text()),
+        ))
+    }
+}
+
+fn print_drive_status(status: &DriveStatus, json: bool, ui: Ui) -> Result<()> {
+    if json {
+        return print_value(true, status);
+    }
+    match status.mounted {
+        Some(true) => ui.success(&format!("Drive mounted at {}", status.path)),
+        Some(false) => {
+            println!("Drive is not mounted");
+            if let Some(next) = &status.next_action {
+                println!("next: {next}");
+            }
+        }
+        None => {
+            println!("Could not confirm Drive status");
+            if let Some(next) = &status.next_action {
+                println!("next: {next}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_drive_mount_success(json: bool, path: &str, msg: &str) -> Result<()> {
+    if json {
+        print_value(
+            true,
+            &serde_json::json!({
+                "ok": true,
+                "mounted": true,
+                "path": path,
+                "next_action": null
+            }),
+        )
+    } else {
+        println!("\u{2713} {msg} at {path}");
+        Ok(())
+    }
+}
+
+fn drive_status_probe_command(path: &str) -> String {
+    let path = shell_single_quote(path);
+    format!(
+        "drive_path={path}; \
+         if [ -d \"$drive_path/MyDrive\" ] || [ -d \"$drive_path/My Drive\" ]; then \
+           echo mounted; \
+         elif [ -d \"$drive_path\" ] && find \"$drive_path\" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then \
+           echo mounted; \
+         elif [ -d \"$drive_path\" ]; then \
+           echo not_mounted; \
+         else \
+           echo not_mounted; \
+         fi; \
+         printf 'path=%s\\n' \"$drive_path\"; \
+         (mount | grep -Ei 'drive|fuse' | head -n 3) >/dev/null 2>&1 || true"
+    )
+}
+
+fn parse_drive_status(output: &str, path: &str) -> DriveStatus {
+    let first = output.lines().next().map(str::trim);
+    match first {
+        Some("mounted") => DriveStatus {
+            ok: true,
+            mounted: Some(true),
+            path: path.to_string(),
+            next_action: None,
+        },
+        Some("not_mounted") => DriveStatus {
+            ok: true,
+            mounted: Some(false),
+            path: path.to_string(),
+            next_action: Some("colab-cli fs drive mount".to_string()),
+        },
+        _ => DriveStatus {
+            ok: false,
+            mounted: None,
+            path: path.to_string(),
+            next_action: Some("colab-cli status check".to_string()),
+        },
+    }
+}
+
+fn drive_preflight_cell() -> &'static str {
+    "import IPython\nip = IPython.get_ipython()\nprint('true' if getattr(ip, 'kernel', None) is not None else 'false')"
+}
+
+fn drive_mount_cell(path: &str) -> String {
+    let path = match serde_json::to_string(path) {
+        Ok(path) => path,
+        Err(_) => "\"/content/drive\"".to_string(),
+    };
+    format!("from google.colab import drive\ndrive.mount({path}, force_remount=False)")
+}
+
+fn drive_output_to_result(output: &runner::CellOutput) -> Result<()> {
+    let raw = output.raw_text();
+    if let Some(err) = classify_drive_error(&raw) {
+        return Err(err);
+    }
+    if output.error_name.is_some() {
+        return Err(ColabError::drive(
+            "drive_mount_failed",
+            "Drive command failed",
+            Some("colab-cli fs drive status"),
+            Some(raw),
+        ));
+    }
+    Ok(())
+}
+
+fn classify_drive_error(raw: &str) -> Option<ColabError> {
+    let lower = raw.to_ascii_lowercase();
+    if raw.contains("AttributeError: 'NoneType' object has no attribute 'kernel'")
+        || lower.contains("get_ipython")
+    {
+        return Some(ColabError::drive(
+            "drive_kernel_context_required",
+            "Drive mount needs a Colab kernel session, not a plain Python process",
+            Some("colab-cli session url --open"),
+            Some(raw.to_string()),
+        ));
+    }
+    if lower.contains("google.colab._message")
+        || lower.contains("blocking_request")
+        || lower.contains("request_auth")
+        || lower.contains("kernel requested input")
+    {
+        return Some(drive_approval_required(Some(raw.to_string())));
+    }
+    if lower.contains("mounting drive is unsupported")
+        || lower.contains("drive.mount is not supported")
+        || lower.contains("colab enterprise")
+    {
+        return Some(ColabError::drive(
+            "drive_unsupported",
+            "Drive mount is not supported for this runtime",
+            Some("colab-cli status check"),
+            Some(raw.to_string()),
+        ));
+    }
+    None
+}
+
+fn drive_approval_required(raw: Option<String>) -> ColabError {
+    ColabError::drive(
+        "drive_browser_approval_required",
+        "Drive needs browser approval",
+        Some("colab-cli session url --open"),
+        raw,
+    )
+}
+
+fn drive_mount_output_looks_ok(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    lower.contains("mounted at") || lower.contains("already mounted")
+}
+
+fn shell_single_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 async fn handle_env(cmd: EnvCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
@@ -1704,6 +2135,13 @@ fn runtime_migration_target(cmd: &RuntimeCommands) -> &'static str {
         RuntimeCommands::Tpu => "colab-cli status runtime --tpu",
         RuntimeCommands::Versions => "colab-cli status runtime --versions",
         RuntimeCommands::Fit { .. } => "colab-cli status runtime --fit MODEL",
+    }
+}
+
+fn mount_migration_target(cmd: &MountCommands) -> &'static str {
+    match cmd {
+        MountCommands::Drive { .. } => "colab-cli fs drive mount",
+        MountCommands::List { .. } => "colab-cli fs drive status",
     }
 }
 
@@ -2948,5 +3386,72 @@ mod tests {
     fn shape_from_flag() {
         assert_eq!(shape_from(false), Shape::Standard);
         assert_eq!(shape_from(true), Shape::HighMem);
+    }
+
+    #[test]
+    fn drive_mount_cell_uses_colab_kernel_code() {
+        let code = drive_mount_cell("/content/drive");
+        assert!(code.contains("from google.colab import drive"));
+        assert!(code.contains("drive.mount(\"/content/drive\", force_remount=False)"));
+        assert!(!code.contains("python -c"));
+    }
+
+    #[test]
+    fn drive_status_parse_handles_mounted_not_mounted_and_unknown() {
+        let mounted = parse_drive_status("mounted\npath=/content/drive", "/content/drive");
+        assert_eq!(mounted.mounted, Some(true));
+        assert!(mounted.next_action.is_none());
+
+        let not_mounted = parse_drive_status("not_mounted\npath=/content/drive", "/content/drive");
+        assert_eq!(not_mounted.mounted, Some(false));
+        assert_eq!(
+            not_mounted.next_action.as_deref(),
+            Some("colab-cli fs drive mount")
+        );
+
+        let unknown = parse_drive_status("", "/content/drive");
+        assert_eq!(unknown.mounted, None);
+        assert_eq!(
+            unknown.next_action.as_deref(),
+            Some("colab-cli status check")
+        );
+    }
+
+    #[test]
+    fn drive_kernel_traceback_gets_friendly_error() {
+        let raw = "AttributeError: 'NoneType' object has no attribute 'kernel'";
+        let Some(ColabError::Drive {
+            kind,
+            message,
+            next_action,
+            raw,
+        }) = classify_drive_error(raw)
+        else {
+            panic!("expected drive error");
+        };
+        assert_eq!(kind, "drive_kernel_context_required");
+        assert_eq!(
+            message,
+            "Drive mount needs a Colab kernel session, not a plain Python process"
+        );
+        assert_eq!(next_action.as_deref(), Some("colab-cli session url --open"));
+        assert!(raw.as_deref().unwrap_or_default().contains("kernel"));
+    }
+
+    #[test]
+    fn drive_auth_request_gets_browser_approval_error() {
+        let raw = "google.colab._message.blocking_request request_auth";
+        let Some(ColabError::Drive {
+            kind,
+            message,
+            next_action,
+            ..
+        }) = classify_drive_error(raw)
+        else {
+            panic!("expected drive error");
+        };
+        assert_eq!(kind, "drive_browser_approval_required");
+        assert_eq!(message, "Drive needs browser approval");
+        assert_eq!(next_action.as_deref(), Some("colab-cli session url --open"));
     }
 }

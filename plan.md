@@ -63,6 +63,7 @@ It should make normal Colab work less annoying:
 - finish compact output style
 - finish `slurp explain`
 - add redacted bug report output checks
+- run the Drive live smoke once with a real Colab kernel and browser approval
 - run first real competitor benchmark pass
 - update claims ledger
 

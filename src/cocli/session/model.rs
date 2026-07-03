@@ -211,6 +211,12 @@ pub struct ListAssignmentsResponse {
 #[derive(Debug, Deserialize)]
 pub struct Session {
     pub id: String,
+    pub kernel: Option<JupyterKernel>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JupyterKernel {
+    pub id: String,
 }
 
 #[derive(Debug, Deserialize)]

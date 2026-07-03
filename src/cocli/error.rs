@@ -36,6 +36,14 @@ pub enum ColabError {
     #[error("local config error: {0}")]
     Config(String),
 
+    #[error("{message}")]
+    Drive {
+        kind: String,
+        message: String,
+        next_action: Option<String>,
+        raw: Option<String>,
+    },
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -70,6 +78,20 @@ impl ColabError {
 
     pub fn config(msg: impl Into<String>) -> Self {
         Self::Config(msg.into())
+    }
+
+    pub fn drive(
+        kind: impl Into<String>,
+        message: impl Into<String>,
+        next_action: Option<&str>,
+        raw: Option<String>,
+    ) -> Self {
+        Self::Drive {
+            kind: kind.into(),
+            message: message.into(),
+            next_action: next_action.map(str::to_string),
+            raw,
+        }
     }
 
     pub fn oauth(msg: impl Into<String>) -> Self {

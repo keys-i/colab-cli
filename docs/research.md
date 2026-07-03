@@ -33,7 +33,7 @@ The command shape is:
 colab-cli <space> <command> <flags>
 ```
 
-That is a little longer than `colab exec`, but it gives the command tree room to stay readable. The current public spaces are `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `settings`, and `release`. I collapsed the older `exec`, `env`, `mount`, `runtime`, `tools`, `config`, and `doctor` spaces because they made users remember too many ways to ask the same question.
+That is a little longer than `colab exec`, but it gives the command tree room to stay readable. The current public spaces are `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `auth`, `settings`, and `completions`. I collapsed the older `exec`, `env`, `mount`, `runtime`, `tools`, `config`, and `doctor` spaces because they made users remember too many ways to ask the same question.
 
 I kept the Rust code as one internal `src/cocli/` module tree. The Rust Book's module guidance fits this better than a pile of small crates right now: group code by responsibility, keep details private, and extract later when a boundary is real. Cargo workspaces are useful, but they add release and versioning work. This project does not have a stable public API split yet.
 

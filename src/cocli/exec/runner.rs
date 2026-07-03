@@ -16,6 +16,142 @@ use crate::cocli::session::store::StoredServer;
 pub type TokenRefresher =
     Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<StoredServer>> + Send>> + Send + Sync>;
 
+#[derive(Debug, Clone, Default)]
+pub struct CellOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub error_name: Option<String>,
+    pub error_value: Option<String>,
+    pub traceback: Vec<String>,
+    pub timed_out: bool,
+}
+
+impl CellOutput {
+    pub fn raw_text(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&self.stdout);
+        out.push_str(&self.stderr);
+        if let Some(name) = &self.error_name {
+            out.push_str(name);
+            out.push('\n');
+        }
+        if let Some(value) = &self.error_value {
+            out.push_str(value);
+            out.push('\n');
+        }
+        for line in &self.traceback {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+}
+
+pub async fn execute_colab_cell(
+    client: &ColabClient,
+    server: &StoredServer,
+    code: &str,
+    timeout: std::time::Duration,
+) -> Result<CellOutput> {
+    let sessions = client.list_sessions_via_tunnel(&server.endpoint).await?;
+    let Some(session) = sessions.iter().find(|s| s.kernel.is_some()) else {
+        return Err(ColabError::drive(
+            "drive_kernel_context_required",
+            "Drive mount needs a Colab kernel session, not a plain Python process",
+            Some("colab-cli session url --open"),
+            None,
+        ));
+    };
+    let kernel_id = session
+        .kernel
+        .as_ref()
+        .map(|kernel| kernel.id.as_str())
+        .ok_or_else(|| {
+            ColabError::drive(
+                "drive_kernel_context_required",
+                "Drive mount needs a Colab kernel session, not a plain Python process",
+                Some("colab-cli session url --open"),
+                None,
+            )
+        })?;
+
+    let ws_url = kernel_ws_url(&server.proxy_url, kernel_id, &session.id);
+    let request = build_ws_request(&ws_url, &server.proxy_token)?;
+    let (ws_stream, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|e| ColabError::oauth(format!("Kernel WebSocket connect failed: {e}")))?;
+    let (mut ws_write, mut ws_read) = ws_stream.split();
+
+    let msg_id = uuid::Uuid::new_v4().to_string();
+    let execute = serde_json::json!({
+        "header": {
+            "msg_id": msg_id,
+            "username": "colab-cli",
+            "session": session.id,
+            "date": chrono::Utc::now().to_rfc3339(),
+            "msg_type": "execute_request",
+            "version": "5.3"
+        },
+        "parent_header": {},
+        "metadata": {},
+        "content": {
+            "code": code,
+            "silent": false,
+            "store_history": true,
+            "user_expressions": {},
+            "allow_stdin": false,
+            "stop_on_error": true
+        },
+        "channel": "shell"
+    });
+    ws_write
+        .send(tungstenite::Message::Text(execute.to_string().into()))
+        .await
+        .map_err(|e| ColabError::oauth(format!("Kernel WebSocket send: {e}")))?;
+
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut out = CellOutput::default();
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            out.timed_out = true;
+            return Ok(out);
+        }
+
+        let msg = tokio::time::timeout(remaining, ws_read.next()).await;
+        let text = match msg {
+            Ok(Some(Ok(tungstenite::Message::Text(text)))) => text,
+            Ok(Some(Ok(tungstenite::Message::Close(_)))) | Ok(None) => return Ok(out),
+            Ok(Some(Err(e))) => return Err(ColabError::oauth(format!("Kernel WebSocket: {e}"))),
+            Err(_) => {
+                out.timed_out = true;
+                return Ok(out);
+            }
+            _ => continue,
+        };
+
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_ref()) else {
+            continue;
+        };
+        if value
+            .pointer("/parent_header/msg_id")
+            .and_then(|v| v.as_str())
+            != Some(msg_id.as_str())
+        {
+            continue;
+        }
+        collect_cell_message(&value, &mut out);
+        if value.pointer("/header/msg_type").and_then(|v| v.as_str()) == Some("status")
+            && value
+                .pointer("/content/execution_state")
+                .and_then(|v| v.as_str())
+                == Some("idle")
+        {
+            return Ok(out);
+        }
+    }
+}
+
 pub async fn run_shell(
     client: &ColabClient,
     server: &StoredServer,
@@ -514,6 +650,90 @@ fn build_ws_request(ws_url: &str, proxy_token: &str) -> Result<tungstenite::http
         )
         .body(())
         .map_err(|e| ColabError::oauth(format!("failed to build WS request: {e}")))
+}
+
+fn kernel_ws_url(proxy_url: &str, kernel_id: &str, session_id: &str) -> String {
+    let base = proxy_url
+        .trim_end_matches('/')
+        .replace("https://", "wss://")
+        .replace("http://", "ws://");
+    format!("{base}/api/kernels/{kernel_id}/channels?session_id={session_id}")
+}
+
+fn collect_cell_message(value: &serde_json::Value, out: &mut CellOutput) {
+    match value.pointer("/header/msg_type").and_then(|v| v.as_str()) {
+        Some("stream") => {
+            let text = value
+                .pointer("/content/text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match value.pointer("/content/name").and_then(|v| v.as_str()) {
+                Some("stderr") => out.stderr.push_str(text),
+                _ => out.stdout.push_str(text),
+            }
+        }
+        Some("execute_result") | Some("display_data") => {
+            append_text_plain(value.pointer("/content/data/text/plain"), &mut out.stdout);
+        }
+        Some("error") => {
+            out.error_name = value
+                .pointer("/content/ename")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            out.error_value = value
+                .pointer("/content/evalue")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            if let Some(lines) = value
+                .pointer("/content/traceback")
+                .and_then(|v| v.as_array())
+            {
+                out.traceback = lines
+                    .iter()
+                    .filter_map(|line| line.as_str().map(str::to_string))
+                    .collect();
+            }
+        }
+        Some("execute_reply") => {
+            if value.pointer("/content/status").and_then(|v| v.as_str()) == Some("error") {
+                if out.error_name.is_none() {
+                    out.error_name = value
+                        .pointer("/content/ename")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                }
+                if out.error_value.is_none() {
+                    out.error_value = value
+                        .pointer("/content/evalue")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                }
+            }
+        }
+        Some("input_request") => {
+            out.stderr
+                .push_str("kernel requested input; open the Colab session in a browser\n");
+        }
+        _ => {}
+    }
+}
+
+fn append_text_plain(value: Option<&serde_json::Value>, out: &mut String) {
+    match value {
+        Some(serde_json::Value::String(s)) => {
+            out.push_str(s);
+            out.push('\n');
+        }
+        Some(serde_json::Value::Array(lines)) => {
+            for line in lines {
+                if let Some(s) = line.as_str() {
+                    out.push_str(s);
+                    out.push('\n');
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn host_from_url(url: &str) -> String {

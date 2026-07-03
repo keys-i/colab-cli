@@ -13,10 +13,10 @@ cargo build --release --manifest-path "$ROOT/Cargo.toml" >/dev/null
 if command -v hyperfine >/dev/null 2>&1; then
   hyperfine --warmup 2 --runs 10 --export-json "$OUT/cocli-hyperfine.json" \
     "$BIN --help" \
-    "$BIN --json doctor quick" \
+    "$BIN --json status quick" \
     "$BIN --json fs sync '$FIXTURE' /content/tmp --dry-run" >/dev/null
 else
-  "$BIN" --json doctor quick > "$OUT/cocli-doctor.json"
+  "$BIN" --json status quick > "$OUT/cocli-status.json"
 fi
 
 cat > "$OUT/cocli-benchmark.md" <<EOF
@@ -28,7 +28,7 @@ Binary: $BIN
 Local deterministic scenarios:
 
 - startup help
-- JSON doctor quick
+- JSON status quick
 - JSON fs sync dry-run against a tiny local tree
 
 Competitor commands were not run by this script unless installed and configured locally.

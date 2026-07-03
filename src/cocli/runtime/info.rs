@@ -75,13 +75,6 @@ pub fn session_url(colab_domain: &str, endpoint: &str) -> Result<String> {
     Ok(url.to_string())
 }
 
-pub fn drive_mount_python(path: &str) -> String {
-    format!(
-        "from google.colab import drive\n\
-         drive.mount({path:?})"
-    )
-}
-
 pub fn pip_install_command(packages: &[String]) -> Vec<String> {
     let mut cmd = vec![
         "python".to_string(),

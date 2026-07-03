@@ -7,7 +7,7 @@ cargo run -- run --help >/tmp/cocli-run-help.txt
 cargo run -- fs --help >/tmp/cocli-fs-help.txt
 cargo run -- settings skills list --help >/tmp/cocli-skills-help.txt
 
-for old in exec env mount runtime tools config doctor; do
+for old in exec env mount runtime tools config doctor release agent; do
   if grep -q "  $old" /tmp/cocli-help.txt; then
     echo "old top-level command leaked into help: $old" >&2
     exit 1
