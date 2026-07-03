@@ -1,0 +1,44 @@
+[shipyard]
+name = "colab-cli"
+release_branch = "release/shipyard"
+changelog = "CHANGELOG.md"
+tag_format = "{package}-v{version}"
+release_name = "{version} — {animal}"
+no_release_labels = ["no-release", "skip-release"]
+
+[versioning]
+scheme = "semver"
+zero_major = "minor-as-breaking"
+conventional_commits = true
+breaking_changes = "semver-checks"
+
+[changelog]
+style = "keep-a-changelog"
+human_sections = true
+group_by = ["breaking", "added", "changed", "fixed", "security", "performance", "docs"]
+include_commit_links = true
+include_pr_links = true
+
+[publish]
+registry = "crates-io"
+dry_run_first = true
+require_clean = true
+require_tests = true
+allow_dirty = false
+enabled = false
+
+[github]
+provider = "github"
+release_pr = true
+create_release = true
+draft = false
+generate_notes = false
+
+[checks]
+shell = false
+commands = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+  "cargo test --workspace --all-features",
+  "cargo doc --workspace --all-features --no-deps"
+]

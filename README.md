@@ -104,6 +104,18 @@ cargo doc --no-deps
 
 Release builds use thin LTO, one codegen unit, symbol stripping, `opt-level = 3`, and `panic = "abort"`.
 
+## Release
+
+Releases are planned with Shipyard:
+
+```sh
+cargo shipyard plan
+cargo shipyard update --dry-run
+cargo shipyard pr --base main
+```
+
+The scheduled workflow runs on the 1st and 16th of each month. Publishing still requires a tag and the crates.io token in the publish job. Shipyard comparison data lives in `target/shipyard/comparison-release-plz.md`; faster than release-plz is not proven until both tools are measured on the same checkout.
+
 ## Docs
 
 - [Commands](docs/commands.md)
@@ -115,6 +127,8 @@ Release builds use thin LTO, one codegen unit, symbol stripping, `opt-level = 3`
 - [Tools](docs/tools.md)
 - [Performance](docs/performance.md)
 - [Publishing](docs/publishing.md)
+- [Release](docs/release.md)
+- [CI/CD](docs/ci-cd.md)
 - [Migration from google-colab-cli](docs/migration-from-google-colab-cli.md)
 - [Research notes](docs/research-notes.md)
 - [Decisions](docs/decisions.md)
