@@ -11,7 +11,7 @@ Budgets:
 Benchmarks:
 
 ```sh
-cargo bench --workspace
+cargo bench
 ```
 
 Coverage:
@@ -27,8 +27,8 @@ Coverage:
 Optional local tools:
 
 ```sh
-cargo flamegraph -p colab-cli -- --help
-cargo bloat --release -p colab-cli
+cargo flamegraph -- --help
+cargo bloat --release
 ```
 
 Benchmark numbers are not CI gates.

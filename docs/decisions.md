@@ -1,21 +1,23 @@
 # Decisions
 
-## Workspace First
+## One Crate
 
-The project is now a Cargo workspace with publishable crates. The existing working Colab HTTP code stayed in `colab-cli` until live integration tests justify moving it.
+The project is one publishable package. Checked against the reference CLI shape; the public API is not stable enough to justify crate splits.
+
+Crates can be extracted later when an external user or plugin proves the boundary.
 
 ## Enum Tool Registry
 
-Built-in tools use enum dispatch. Add trait objects when external plugin loading needs them.
+Built-in tools use enum dispatch. Add trait objects only when a real external plugin exists.
 
 ## Sync Dry-Run First
 
-`cocli-fs` implements local manifests and diff planning. `fs sync` writes no remote data unless future work verifies remote timestamp and hash semantics against Colab Contents API responses.
+`fs sync` plans local changes. It writes no remote data until remote timestamp/hash behavior is tested against live Colab Contents API responses.
 
 ## Continuation Is Honest
 
-Continuation is checkpoint/replay, not process transfer.
+Continuation is checkpoint/replay, not live Python process transfer.
 
 ## No Unsafe
 
-The only prior unsafe string slice was replaced with a safe slice after an ASCII prefix check.
+Unsafe code is forbidden by package lints.

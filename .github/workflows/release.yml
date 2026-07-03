@@ -27,16 +27,11 @@ jobs:
         env:
           COLAB_EXTENSION_CLIENT_ID: ${{ secrets.COLAB_EXTENSION_CLIENT_ID }}
           COLAB_EXTENSION_CLIENT_NOT_SO_SECRET: ${{ secrets.COLAB_EXTENSION_CLIENT_NOT_SO_SECRET }}
-        run: cargo build --workspace --release --locked
+        run: cargo build --release --locked
 
       - name: cargo package
-        run: cargo package --workspace --allow-dirty
+        run: cargo package --allow-dirty
 
       - name: publish dry-run
         run: |
-          cargo publish --dry-run -p cocli-protocol
-          cargo publish --dry-run -p cocli-core
-          cargo publish --dry-run -p cocli-colab
-          cargo publish --dry-run -p cocli-fs
-          cargo publish --dry-run -p cocli-tools
           cargo publish --dry-run -p colab-cli

@@ -1,23 +1,42 @@
 # Architecture
 
-The workspace has six publishable crates.
+`colab-cli` is one publishable Rust package.
 
-`colab-cli` owns the binary, auth flow, Colab HTTP client, session manager, terminal bridge, and command handlers. Existing working Colab code stayed here to avoid a risky move across crate boundaries.
+Implementation lives under `src/cocli/`, grouped by command space. The public API is intentionally tiny: the binary calls `cocli::cli::dispatch`, and most modules are internal implementation detail.
 
-`cocli-core` owns small local utilities: config, color policy, terminal bell policy, duration parsing, and compact session lookup.
+Why one crate:
 
-`cocli-colab` owns safe Colab-facing request intent and command snippets. It does not copy `google.colab` Python implementation code.
+- the public API is not stable yet
+- command handlers share auth, session, and UI code
+- separate crates added versioning and publish work without real reuse
+- future crate extraction is still possible when an external user proves the boundary
 
-`cocli-protocol` owns JSON structs for continuation manifests, file entries, execution steps, and tool specs.
+Current layout:
 
-`cocli-fs` owns local file manifests, default excludes, sync diff planning, safe local joins, and remote chunk plans.
-
-`cocli-tools` owns the built-in tool registry. It uses enum dispatch instead of an async trait until external plugin execution needs dynamic dispatch.
+```text
+src/main.rs
+src/lib.rs
+src/cocli/
+  cli/        clap args and dispatch
+  auth/       OAuth, token storage, profiles, redaction
+  session/    Colab client, session model, local session store
+  exec/       shell and command runners
+  fs/         manifests, excludes, sync planning
+  runtime/    runtime metadata and Colab command snippets
+  slurp/      Slurp TOML parsing and explanation
+  fleet/      compliance checks and scheduler planning
+  continue/   continuation manifest and resume planning
+  tools/      small built-in registry used by agent commands
+  config/     config files and UI config
+  release/    release names and notes helpers
+  ui/         terminal output
+  util/       ids, paths, time, JSON helpers
+```
 
 Invariants:
 
 - no unsafe code
-- user errors return typed errors, not panics
-- destructive new commands require explicit confirmation
-- JSON output contains no ANSI codes
-- terminal bell is opt-in and disabled in CI or quiet mode
+- JSON output contains no ANSI
+- destructive commands need explicit confirmation
+- continuation is checkpoint/replay, not live Python memory transfer
+- fleet mode is planning for approved runtimes, not free-tier quota bypass

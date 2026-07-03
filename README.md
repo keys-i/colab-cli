@@ -1,6 +1,6 @@
 # colab-cli
 
-Rust CLI for Google Colab sessions, execution, file transfer, continuation bundles, and agent-friendly tool discovery.
+Rust CLI for Google Colab sessions, execution, file transfer, continuation bundles, Slurp plans, and local diagnostics.
 
 ## Quick Start
 
@@ -9,6 +9,7 @@ colab-cli session new --name train --gpu T4
 colab-cli env install --session train torch transformers
 colab-cli exec run train.py --session train -- --epochs 3
 colab-cli continue save --session train --name train-run
+colab-cli continue resume train-run --dry-run
 colab-cli fs pull /content/checkpoints ./checkpoints
 colab-cli session stop --name train
 ```
@@ -52,38 +53,53 @@ colab-cli fs push ./data.csv /content/data.csv
 colab-cli fs pull /content/out ./out
 colab-cli fs rm /content/tmp --recursive --yes
 colab-cli fs sync ./src /content/src --dry-run
-colab-cli fs diff ./src /content/src
+colab-cli fs changed ./src /content/src
 
 colab-cli mount drive --session trainer --path /content/drive
 colab-cli env install torch transformers --session trainer
-colab-cli runtime backend-info
+colab-cli runtime info --backend
+colab-cli runtime fit --model llama-7b
 colab-cli tools list
-colab-cli doctor
+colab-cli doctor quick
 ```
 
 Compatibility groups `server` and `file` still parse. Hidden aliases cover cheap old `colab new`, `colab sessions`, `colab upload`, and `colab download` forms with migration hints.
 
-## Workspace
+## Layout
 
 ```text
-crates/
-  colab-cli/        binary crate and existing Colab HTTP/client code
-  cocli-core/       config, session lookup, color and terminal bell policy
-  cocli-colab/      Colab request helpers and safe command snippets
-  cocli-tools/      built-in tool registry and JSON tool output
-  cocli-protocol/   continuation and tool protocol structs
-  cocli-fs/         manifests, diff planning, chunk planning
+src/
+  main.rs
+  lib.rs
+  cocli/
+    cli/
+    auth/
+    session/
+    exec/
+    fs/
+    runtime/
+    slurp/
+    fleet/
+    continue/
+    tools/
+    config/
+    doctor/
+    release/
+    ui/
+    util/
 ```
 
-Unsafe code is forbidden by workspace lints.
+One package is published: `colab-cli`. Internal modules can become crates later if a real public API needs that.
+
+Unsafe code is forbidden by package lints.
 
 ## Build
 
 ```sh
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo doc --workspace --no-deps
+cargo build
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
+cargo doc --no-deps
 ```
 
 Release builds use thin LTO, one codegen unit, symbol stripping, `opt-level = 3`, and `panic = "abort"`.
@@ -92,6 +108,9 @@ Release builds use thin LTO, one codegen unit, symbol stripping, `opt-level = 3`
 
 - [Commands](docs/commands.md)
 - [Architecture](docs/architecture.md)
+- [Refactor map](docs/refactor-map.md)
+- [Prune report](docs/prune-report.md)
+- [Easter eggs](docs/easter-eggs.md)
 - [Continuation](docs/continuation.md)
 - [Tools](docs/tools.md)
 - [Performance](docs/performance.md)

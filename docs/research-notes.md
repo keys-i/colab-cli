@@ -11,7 +11,7 @@ Primary sources:
 
 `colab-mcp` is an MCP bridge from a local agent to a Colab browser session. The useful pattern is discoverable tools plus local-client requirements. This rewrite exposes tool specs and keeps execution behind CLI confirmation.
 
-`colabtools` publishes Python libraries available inside Colab. Its README states the code is not intended for private reuse. This workspace learns concepts such as Drive mounting and runtime helpers but does not vendor implementation code.
+`colabtools` publishes Python libraries available inside Colab. Its README states the code is not intended for private reuse. This project learns concepts such as Drive mounting and runtime helpers but does not vendor implementation code.
 
 `backend-info` publishes `apt-list.txt` and `pip-freeze.txt` snapshots. Its README says those files can lag production runtimes by one or two days. The CLI links to them as metadata, not as an exact live runtime promise.
 

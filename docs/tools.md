@@ -1,6 +1,8 @@
 # Tools
 
-`cocli-tools` exposes built-in specs:
+The built-in registry lives in `src/cocli/tools/registry.rs`.
+
+Built-ins:
 
 - `session_new`
 - `session_status`
@@ -23,13 +25,10 @@ colab-cli tools inspect fs_push --json
 colab-cli tools run fs_push --json '{"src":"./data.csv","dest":"/content/data.csv"}'
 ```
 
-Tool run output is a JSON plan. The CLI owns credentials, confirmation, and actual remote execution.
+`tools run` returns a JSON plan. It does not execute hidden agent actions.
 
-MCP:
+Deferred:
 
-```sh
-cargo build -p colab-cli --features mcp
-colab-cli agent mcp --stdio
-```
-
-The MCP adapter is experimental and feature-gated.
+- external plugin loading
+- MCP server
+- plugin marketplace
