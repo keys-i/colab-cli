@@ -27,3 +27,17 @@ Removed or deferred:
 - no async trait object tool registry
 - no external watcher dependency for `fs sync --watch`
 - no automatic pickle load path
+
+## Evidence Rules
+
+Nielsen's heuristics are used as a checklist: status must be visible, risky actions need dry-run or confirmation, recovery text must name the next command, and output must stay minimal.
+
+SEQ/SUS are not claimed yet. `docs/usability-study.md` contains the script; results stay `not tested yet` until real users run it.
+
+SemVer claims for release tooling must combine commit labels with semantic checks when possible. Conventional Commit labels alone are hints, not proof of API safety.
+
+Rust supply-chain review tracks dependency effects: proc macros, build scripts, unsafe code, filesystem/process/network use, registry interaction, and secret redaction.
+
+Agent-friendly output means explicit labels, stable JSON, recoverable actions, and no hidden modal state.
+
+File sync claims require measured bytes. A no-op sync win is not proven until cocli has a cached or fetched remote manifest baseline.
