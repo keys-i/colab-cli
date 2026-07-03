@@ -15,6 +15,8 @@ Both tools use one output rule: human output is short; JSON is machine-only.
 
 No raw ANSI in JSON. Respect `NO_COLOR`, `--quiet`, and CI.
 
+The no-command launcher is interactive-only. In pipes or scripts, output stays plain and predictable.
+
 ## Formats
 
 Error:

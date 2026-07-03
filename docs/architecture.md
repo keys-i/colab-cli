@@ -28,7 +28,7 @@ src/cocli/
   continue/   continuation manifest and resume planning
   tools/      built-in registry shown through settings skills
   config/     config files behind settings
-  release/    release names and notes helpers
+  release/    owner-tools release names and notes helpers
   ui/         terminal output
   util/       ids, paths, time, JSON helpers
 ```
@@ -37,6 +37,7 @@ Invariants:
 
 - no unsafe code
 - JSON output contains no ANSI
+- owner release helpers are behind the `owner-tools` feature
 - destructive commands need explicit confirmation
 - continuation is checkpoint/replay, not live Python memory transfer
 - fleet mode is planning for approved runtimes, not free-tier quota bypass

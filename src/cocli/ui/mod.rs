@@ -9,15 +9,21 @@ use crate::cocli::session::store::StoredServer;
 #[derive(Clone, Copy)]
 pub struct Ui {
     pub quiet: bool,
+    pub plain: bool,
+    pub interactive: bool,
 }
 
 impl Ui {
-    pub fn new(quiet: bool) -> Self {
-        Self { quiet }
+    pub fn new(quiet: bool, plain: bool, interactive: bool) -> Self {
+        Self {
+            quiet,
+            plain,
+            interactive,
+        }
     }
 
     pub fn spinner(&self, msg: &str) -> Option<ProgressBar> {
-        if self.quiet {
+        if self.quiet || !self.interactive {
             return None;
         }
         let pb = ProgressBar::new_spinner();
@@ -45,7 +51,7 @@ impl Ui {
     }
 
     pub fn success(&self, msg: &str) {
-        if self.quiet {
+        if self.quiet || self.plain {
             println!("{msg}");
         } else {
             println!("{} {msg}", "\u{2713}".green().bold());
@@ -53,7 +59,7 @@ impl Ui {
     }
 
     pub fn info(&self, msg: &str) {
-        if self.quiet {
+        if self.quiet || self.plain {
             println!("{msg}");
         } else {
             println!("{} {msg}", "\u{00b7}".dimmed());
@@ -61,7 +67,7 @@ impl Ui {
     }
 
     pub fn warn(&self, msg: &str) {
-        if self.quiet {
+        if self.quiet || self.plain {
             eprintln!("warning: {msg}");
         } else {
             eprintln!("{} {msg}", "\u{26a0}".yellow().bold());
@@ -69,7 +75,7 @@ impl Ui {
     }
 
     pub fn error(&self, msg: &str) {
-        if self.quiet {
+        if self.quiet || self.plain {
             eprintln!("error: {msg}");
         } else {
             eprintln!("{} {msg}", "error:".red().bold());

@@ -46,8 +46,18 @@ impl ColorChoice {
 pub struct UiConfig {
     #[serde(default)]
     pub color: ColorChoice,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default = "default_true")]
+    pub interactive: bool,
+    #[serde(default = "default_true")]
+    pub animations: bool,
     #[serde(default)]
     pub bell: bool,
+    #[serde(default)]
+    pub compact: bool,
+    #[serde(default = "default_true")]
+    pub unicode: bool,
     #[serde(default)]
     pub fun: bool,
 }
@@ -56,8 +66,57 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             color: ColorChoice::Auto,
+            theme: default_theme(),
+            interactive: true,
+            animations: true,
             bell: false,
+            compact: false,
+            unicode: true,
             fun: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct OutputConfig {
+    #[serde(default)]
+    pub json: bool,
+    #[serde(default)]
+    pub quiet: bool,
+    #[serde(default)]
+    pub verbose: bool,
+    #[serde(default)]
+    pub timestamps: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupportConfig {
+    #[serde(default = "default_true")]
+    pub redact_paths: bool,
+    #[serde(default = "default_true")]
+    pub redact_emails: bool,
+    #[serde(default = "default_true")]
+    pub redact_tokens: bool,
+}
+
+impl Default for SupportConfig {
+    fn default() -> Self {
+        Self {
+            redact_paths: true,
+            redact_emails: true,
+            redact_tokens: true,
         }
     }
 }
@@ -66,6 +125,12 @@ impl Default for UiConfig {
 pub struct CocliConfig {
     #[serde(default)]
     pub ui: UiConfig,
+    #[serde(default)]
+    pub output: OutputConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
+    #[serde(default)]
+    pub support: SupportConfig,
 }
 
 impl CocliConfig {
@@ -84,6 +149,14 @@ impl CocliConfig {
         let body = toml::to_string_pretty(self)?;
         write_private(path, body.as_bytes())
     }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_theme() -> String {
+    "auto".to_string()
 }
 
 pub fn terminal_bell_allowed(enabled: bool, ci: bool, quiet: bool) -> bool {

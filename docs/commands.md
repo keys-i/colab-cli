@@ -122,7 +122,7 @@ colab-cli settings path
 colab-cli settings edit
 colab-cli settings skills list
 colab-cli settings skills inspect session.new
-colab-cli settings skills run fs.push --json '{"src":"./data.csv","dest":"/content/data.csv"}'
+colab-cli settings skills run fs.push --json-input '{"src":"./data.csv","dest":"/content/data.csv"}'
 ```
 
 Skills are built-in command plans. This is not a plugin marketplace.

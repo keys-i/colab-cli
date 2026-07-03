@@ -30,7 +30,7 @@ This pass removed old public command spaces from normal help and kept hidden ali
 | `session_new` | `session.new` | skill registry, tools docs, tests | internal alias only | Dot names are easier to read in JSON and tables. |
 | `exec_python` | `run.python` | skill registry, tools docs, tests | internal alias only | Old snake name still resolves for one cycle. |
 | `env_install` | `run.install` | skill registry, tools docs | internal alias only | Matches the run command surface. |
-| `runtime_info` | `runtime.info` | skill registry, tools docs | internal alias only | Skill names describe the action, not the old command space. |
+| `runtime_info` | `status.runtime` | skill registry, skills docs | internal alias only | Runtime reads live under status. |
 | `doctor` skill | `status.check` | skill registry, tools docs | internal alias only | Health checks moved under status. |
 
 ## Drive Mount Fix

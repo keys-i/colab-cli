@@ -11,7 +11,7 @@ pub struct Cli {
     #[arg(long, short, global = true, env = "COLAB_QUIET")]
     pub quiet: bool,
 
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub json: bool,
 
     #[arg(long, global = true)]
@@ -26,8 +26,17 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub bell: bool,
 
+    #[arg(long, global = true)]
+    pub no_interactive: bool,
+
+    #[arg(long, global = true)]
+    pub plain: bool,
+
+    #[arg(long, global = true)]
+    pub tui: bool,
+
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -68,16 +77,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: FleetCommands,
     },
-    /// edit config and inspect skills
+    /// edit config, UI, skills, and support
     Settings {
         #[command(subcommand)]
-        command: SettingsCommands,
-    },
-    /// release metadata and maintainer helpers
-    #[command(hide = true)]
-    Release {
-        #[command(subcommand)]
-        command: ReleaseCommands,
+        command: Option<SettingsCommands>,
     },
     /// Authentication
     Auth {
@@ -621,7 +624,7 @@ pub enum ToolsCommands {
     },
     Run {
         tool_name: String,
-        #[arg(long = "json", default_value = "{}")]
+        #[arg(long = "json-input", default_value = "{}")]
         input_json: String,
         #[arg(long)]
         yes: bool,
@@ -635,7 +638,9 @@ pub enum ToolsCommands {
 
 #[derive(Subcommand)]
 pub enum SettingsCommands {
-    Get,
+    Get {
+        key: Option<String>,
+    },
     Set {
         key: String,
         value: String,
@@ -651,6 +656,20 @@ pub enum SettingsCommands {
         #[command(subcommand)]
         command: SkillCommands,
     },
+    Ui {
+        #[command(subcommand)]
+        command: Option<SettingsUiCommands>,
+    },
+    Support {
+        #[command(subcommand)]
+        command: SupportCommands,
+    },
+    #[cfg(feature = "owner-tools")]
+    #[command(hide = true)]
+    Owner {
+        #[command(subcommand)]
+        command: OwnerCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -661,9 +680,15 @@ pub enum SkillCommands {
         #[arg(long)]
         category: Option<String>,
         #[arg(long)]
+        scope: Option<String>,
+        #[arg(long)]
         risk: Option<String>,
         #[arg(long)]
         needs_session: bool,
+        #[arg(long)]
+        enabled: bool,
+        #[arg(long)]
+        disabled: bool,
     },
     Inspect {
         name: String,
@@ -672,7 +697,7 @@ pub enum SkillCommands {
     },
     Run {
         name: String,
-        #[arg(long = "json", default_value = "{}")]
+        #[arg(long = "json-input", default_value = "{}")]
         input_json: String,
         #[arg(long)]
         yes: bool,
@@ -682,6 +707,32 @@ pub enum SkillCommands {
     },
     Disable {
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SettingsUiCommands {
+    Preview,
+}
+
+#[derive(Subcommand)]
+pub enum SupportCommands {
+    BugReport {
+        #[arg(long)]
+        show_private: bool,
+    },
+    Redact {
+        text: Option<String>,
+    },
+    Bundle,
+}
+
+#[cfg(feature = "owner-tools")]
+#[derive(Subcommand)]
+pub enum OwnerCommands {
+    Release {
+        #[command(subcommand)]
+        command: ReleaseCommands,
     },
 }
 
@@ -755,7 +806,7 @@ pub enum SlurpCommands {
 #[derive(Subcommand)]
 pub enum ReleaseCommands {
     Name {
-        version: String,
+        version: Option<String>,
     },
     Notes {
         version: String,
@@ -1003,9 +1054,9 @@ mod tests {
         .unwrap();
         assert!(matches!(
             cli.command,
-            Commands::Session {
+            Some(Commands::Session {
                 command: SessionCommands::New(_)
-            }
+            })
         ));
     }
 
@@ -1023,14 +1074,14 @@ mod tests {
             "3",
         ])
         .unwrap();
-        let Commands::Run {
+        let Some(Commands::Run {
             command:
                 RunCommands::Script {
                     script,
                     session,
                     args,
                 },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected run script");
         };
@@ -1058,7 +1109,19 @@ mod tests {
             Cli::try_parse_from(["colab-cli", "fleet", "plan", "--config", "slurp.toml"]).is_ok()
         );
         assert!(Cli::try_parse_from(["colab-cli", "slurp", "explain"]).is_ok());
-        assert!(Cli::try_parse_from(["colab-cli", "release", "name", "v0.4.2"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "release", "name", "v0.4.2"]).is_err());
+        #[cfg(feature = "owner-tools")]
+        assert!(
+            Cli::try_parse_from([
+                "colab-cli",
+                "settings",
+                "owner",
+                "release",
+                "name",
+                "v0.4.2"
+            ])
+            .is_ok()
+        );
     }
 
     #[test]

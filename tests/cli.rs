@@ -25,6 +25,8 @@ fn parses_major_command_spaces() {
         ["colab-cli", "fleet", "plan"].as_slice(),
         ["colab-cli", "settings", "skills", "list"].as_slice(),
         ["colab-cli", "settings", "skills", "inspect", "session.new"].as_slice(),
+        ["colab-cli", "settings", "ui", "preview"].as_slice(),
+        ["colab-cli", "settings", "support", "bug-report"].as_slice(),
         ["colab-cli", "continue", "last"].as_slice(),
         ["colab-cli", "settings", "path"].as_slice(),
         ["colab-cli", "settings", "locate"].as_slice(),
@@ -84,6 +86,26 @@ fn json_output_has_no_ansi() {
 }
 
 #[test]
+fn status_human_output_is_not_json() {
+    let out = bin().arg("status").output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("cocli status"));
+    assert!(stdout.contains("Auth"));
+    assert!(!stdout.trim_start().starts_with('{'));
+}
+
+#[test]
+fn no_command_shows_launcher_fallback_in_non_tty() {
+    let out = bin().output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("cocli"));
+    assert!(stdout.contains("Quick actions"));
+    assert!(stdout.contains("Run `colab-cli --help` for commands."));
+}
+
+#[test]
 fn quiet_suppresses_vibe_art() {
     let out = bin().args(["--quiet", "doctor"]).output().unwrap();
     assert!(out.status.success());
@@ -100,6 +122,10 @@ fn docs_exist() {
         "docs/research.md",
         "docs/command-audit.md",
         "docs/drive.md",
+        "docs/ui.md",
+        "docs/settings.md",
+        "docs/skills.md",
+        "docs/owner-tools.md",
         "docs/feature-test-plan.md",
         "docs/live-testing.md",
         "plan.md",
@@ -128,6 +154,9 @@ fn settings_skills_list_is_catalog_not_debug_rows() {
     assert!(stdout.contains("Skill"));
     assert!(stdout.contains("session.new"));
     assert!(stdout.contains("run.python"));
+    assert!(stdout.contains("slurp.plan"));
+    assert!(stdout.contains("fleet.plan"));
+    assert!(stdout.contains("agent.audit"));
     assert!(!stdout.contains("session_new"));
     assert!(!stdout.contains("session=false"));
 }
@@ -145,8 +174,46 @@ fn settings_skills_json_has_stable_fields() {
     let first = value.as_array().unwrap().first().unwrap();
     assert!(first.get("name").is_some());
     assert!(first.get("category").is_some());
+    assert!(first.get("scope").is_some());
     assert!(first.get("risk").is_some());
     assert!(first.get("needs_session").is_some());
+}
+
+#[test]
+fn settings_default_renders_sections() {
+    let out = bin().arg("settings").output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("cocli settings"));
+    assert!(stdout.contains("General"));
+    assert!(stdout.contains("UI"));
+    assert!(stdout.contains("Skills"));
+    assert!(!stdout.trim_start().starts_with('{'));
+}
+
+#[cfg(feature = "owner-tools")]
+#[test]
+fn owner_release_is_feature_gated_and_user_gated() {
+    let blocked = bin()
+        .env("USER", "not-keys")
+        .env("COLAB_CLI_OWNER", "keys")
+        .args(["settings", "owner", "release", "name"])
+        .output()
+        .unwrap();
+    assert!(!blocked.status.success());
+    let stderr = String::from_utf8(blocked.stderr).unwrap();
+    assert!(stderr.contains("owner tools are disabled for this user"));
+
+    let allowed = bin()
+        .env("USER", "keys")
+        .env("COLAB_CLI_OWNER", "keys")
+        .args(["settings", "owner", "release", "name"])
+        .output()
+        .unwrap();
+    assert!(allowed.status.success());
+    let stdout = String::from_utf8(allowed.stdout).unwrap();
+    assert!(stdout.trim_start().starts_with('v'));
+    assert!(stdout.contains(" - "));
 }
 
 #[test]

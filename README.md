@@ -2,6 +2,8 @@
 
 Rust CLI for Google Colab sessions, execution, file transfer, continuation bundles, Slurp plans, and local diagnostics.
 
+Running `colab-cli` with no command opens a small launcher when stdin and stdout are interactive. Scripts should call explicit commands and use `--json` when they need machine output.
+
 ## Quick Start
 
 ```sh
@@ -85,7 +87,7 @@ src/
     continue/
     tools/
     config/
-    release/
+    release/    owner-tools feature only
     ui/
     util/
 ```
@@ -129,6 +131,10 @@ Research notes live in [docs/research.md](docs/research.md). The current build p
 - [Prune report](docs/prune-report.md)
 - [Command audit](docs/command-audit.md)
 - [Drive](docs/drive.md)
+- [UI](docs/ui.md)
+- [Settings](docs/settings.md)
+- [Skills](docs/skills.md)
+- [Owner tools](docs/owner-tools.md)
 - [Feature test plan](docs/feature-test-plan.md)
 - [Live testing](docs/live-testing.md)
 - [Easter eggs](docs/easter-eggs.md)

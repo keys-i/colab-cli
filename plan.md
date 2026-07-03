@@ -23,6 +23,7 @@ It should make normal Colab work less annoying:
 - [ ] Slurp config can be explained before it runs
 - [ ] status commands give one next action
 - [ ] JSON output has no ANSI
+- [ ] no-command launcher is useful without hurting scripts
 - [ ] fun output never appears in CI, JSON, quiet mode, or serious errors
 - [ ] benchmarks compare against google-colab-cli and manual workflows
 - [ ] README claims match `docs/claims-ledger.md`
@@ -61,6 +62,7 @@ It should make normal Colab work less annoying:
 - make `status quick` tighter
 - make `fs changed` compare against a real remote/cache manifest
 - finish compact output style
+- keep the launcher small and command-preview based
 - finish `slurp explain`
 - add redacted bug report output checks
 - run the Drive live smoke once with a real Colab kernel and browser approval

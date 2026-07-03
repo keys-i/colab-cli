@@ -54,6 +54,11 @@ url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 
+[features]
+default = []
+owner-tools = []
+agent-tools = []
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"

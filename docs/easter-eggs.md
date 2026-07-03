@@ -8,7 +8,7 @@ Maintainer helper:
 colab-cli settings set ui.fun true
 ```
 
-`colab-cli release name v0.4.2` still parses as a hidden maintainer helper, but it is not part of the normal help surface.
+`colab-cli settings owner release name` exists only when built with `--features owner-tools`.
 
 Rules:
 
