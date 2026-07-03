@@ -353,6 +353,8 @@ pub struct FsSyncArgs {
     #[arg(long)]
     pub dry_run: bool,
     #[arg(long)]
+    pub explain: bool,
+    #[arg(long)]
     pub delete: bool,
     #[arg(long)]
     pub watch: bool,
@@ -566,7 +568,11 @@ pub enum ContinueCommands {
 #[derive(Subcommand)]
 pub enum ConfigCommands {
     Get,
-    Set { key: String, value: String },
+    Set {
+        key: String,
+        value: String,
+    },
+    #[command(alias = "locate")]
     Path,
     Open,
 }

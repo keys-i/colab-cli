@@ -77,7 +77,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         }
         Commands::Fs { command } => {
             let config = ColabConfig::load(cli.quiet)?;
-            handle_fs(command, &config, ui).await
+            handle_fs(command, &config, ui, json).await
         }
         Commands::Mount { command } => {
             let config = ColabConfig::load(cli.quiet)?;
@@ -385,7 +385,7 @@ async fn handle_exec(cmd: ExecCommands, config: &ColabConfig, ui: Ui) -> Result<
     }
 }
 
-async fn handle_fs(cmd: FsCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+async fn handle_fs(cmd: FsCommands, config: &ColabConfig, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         FsCommands::Ls { path, session } => {
             let args = vec![
@@ -419,7 +419,7 @@ async fn handle_fs(cmd: FsCommands, config: &ColabConfig, ui: Ui) -> Result<()> 
             handle_file_rm(config, ui, session, args).await
         }
         FsCommands::Edit { path, session } => handle_file_edit(config, ui, session, path).await,
-        FsCommands::Sync(args) => handle_fs_sync(args, ui),
+        FsCommands::Sync(args) => handle_fs_sync(args, ui, json),
         FsCommands::Diff(args) => handle_fs_diff(args, ui),
         FsCommands::Changed(args) => handle_fs_diff(args, ui),
     }
@@ -1212,7 +1212,7 @@ async fn handle_file_edit(
     ))
 }
 
-fn handle_fs_sync(args: FsSyncArgs, ui: Ui) -> Result<()> {
+fn handle_fs_sync(args: FsSyncArgs, ui: Ui, json: bool) -> Result<()> {
     if args.watch {
         return Err(ColabError::config(
             "fs sync --watch needs a file watcher backend; run without --watch for a manifest plan",
@@ -1224,7 +1224,16 @@ fn handle_fs_sync(args: FsSyncArgs, ui: Ui) -> Result<()> {
         ));
     }
     let plan = local_sync_plan(&args.local, &args.include, &args.exclude, args.delete)?;
-    ui.success("sync dry-run planned");
+    if args.explain && !json {
+        println!("fs sync dry-run");
+        println!("local: {}", args.local);
+        println!("remote: {}", args.remote);
+        println!("upload: {} file(s)", plan.upload.len());
+        println!("delete remote: {} file(s)", plan.delete_remote.len());
+        println!("unchanged: {} file(s)", plan.unchanged);
+    } else if !json {
+        ui.success("sync dry-run planned");
+    }
     println!("{}", serde_json::to_string_pretty(&plan)?);
     Ok(())
 }

@@ -19,6 +19,7 @@ fn parses_major_command_spaces() {
         ["colab-cli", "agent", "tools"].as_slice(),
         ["colab-cli", "continue", "last"].as_slice(),
         ["colab-cli", "config", "path"].as_slice(),
+        ["colab-cli", "config", "locate"].as_slice(),
         ["colab-cli", "doctor", "quick"].as_slice(),
         ["colab-cli", "release", "name", "v0.4.2"].as_slice(),
     ] {
@@ -67,6 +68,31 @@ fn config_open_prints_path_without_editor() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("config.toml"));
+}
+
+#[test]
+fn fs_sync_json_dry_run_has_no_human_prefix() {
+    let temp = std::env::temp_dir().join(format!("cocli-test-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(temp.join("a.txt"), "ok").unwrap();
+    let out = bin()
+        .args([
+            "--json",
+            "fs",
+            "sync",
+            temp.to_str().unwrap(),
+            "/content/tmp",
+            "--dry-run",
+            "--explain",
+        ])
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&temp);
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.trim_start().starts_with('{'));
+    assert!(!stdout.contains("sync dry-run planned"));
+    assert!(!stdout.contains("\x1b["));
 }
 
 fn bin() -> Command {
