@@ -118,8 +118,12 @@ The scheduled workflow runs on the 1st and 16th of each month. Publishing still 
 
 ## Docs
 
+Research notes live in [docs/research.md](docs/research.md). The current build plan lives in [plan.md](plan.md).
+
 - [Commands](docs/commands.md)
 - [Architecture](docs/architecture.md)
+- [Research](docs/research.md)
+- [Plan](plan.md)
 - [Refactor map](docs/refactor-map.md)
 - [Prune report](docs/prune-report.md)
 - [Easter eggs](docs/easter-eggs.md)

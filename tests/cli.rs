@@ -53,6 +53,8 @@ fn docs_exist() {
         "docs/refactor-map.md",
         "docs/prune-report.md",
         "docs/easter-eggs.md",
+        "docs/research.md",
+        "plan.md",
     ] {
         assert!(std::path::Path::new(path).exists(), "{path}");
     }
