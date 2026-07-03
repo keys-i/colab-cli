@@ -112,7 +112,7 @@ async fn wait_for_auth_code(config: &ColabConfig) -> Result<(String, String, Str
 
     let nonce: String = {
         use std::fmt::Write;
-        let bytes: [u8; 16] = rand_bytes();
+        let bytes: [u8; 16] = rand_bytes()?;
         let mut s = String::with_capacity(32);
         for b in &bytes {
             let _ = write!(s, "{b:02x}");
@@ -120,7 +120,7 @@ async fn wait_for_auth_code(config: &ColabConfig) -> Result<(String, String, Str
         s
     };
 
-    let (code_verifier, code_challenge) = pkce_pair();
+    let (code_verifier, code_challenge) = pkce_pair()?;
 
     let auth_url = build_auth_url(config, &redirect_uri, &nonce, &code_challenge);
 
@@ -234,8 +234,8 @@ async fn fetch_user_info(http: &Client, access_token: &str) -> Result<AccountInf
     })
 }
 
-fn pkce_pair() -> (String, String) {
-    let verifier_bytes = rand_bytes_n(64);
+fn pkce_pair() -> Result<(String, String)> {
+    let verifier_bytes = rand_bytes_n(64)?;
     let verifier = URL_SAFE_NO_PAD.encode(&verifier_bytes);
 
     use sha2::{Digest, Sha256};
@@ -243,19 +243,21 @@ fn pkce_pair() -> (String, String) {
     hasher.update(verifier.as_bytes());
     let challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
 
-    (verifier, challenge)
+    Ok((verifier, challenge))
 }
 
-fn rand_bytes() -> [u8; 16] {
+fn rand_bytes() -> Result<[u8; 16]> {
     let mut b = [0u8; 16];
-    getrandom::getrandom(&mut b).expect("getrandom failed");
-    b
+    getrandom::getrandom(&mut b)
+        .map_err(|e| ColabError::oauth(format!("getrandom failed: {e}")))?;
+    Ok(b)
 }
 
-fn rand_bytes_n(n: usize) -> Vec<u8> {
+fn rand_bytes_n(n: usize) -> Result<Vec<u8>> {
     let mut b = vec![0u8; n];
-    getrandom::getrandom(&mut b).expect("getrandom failed");
-    b
+    getrandom::getrandom(&mut b)
+        .map_err(|e| ColabError::oauth(format!("getrandom failed: {e}")))?;
+    Ok(b)
 }
 
 fn build_auth_url(

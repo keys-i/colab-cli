@@ -1,0 +1,24 @@
+[package]
+name = "cocli-tools"
+version = "0.2.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Typed built-in tool registry for colab-cli and agent-friendly integrations."
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include = ["src/**/*.rs", "Cargo.toml", "README.md"]
+
+[dependencies]
+cocli-protocol = { version = "0.2.0", path = "../cocli-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+

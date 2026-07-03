@@ -12,8 +12,8 @@ use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use crate::client::api::{
-    Assignment, CcuInfo, GetAssignmentResponse, JupyterTerminal, ListAssignmentsResponse,
-    ListedAssignment, Outcome, RuntimeProxyInfo, Session, Shape, Variant,
+    Assignment, CcuInfo, ContentsEntry, GetAssignmentResponse, JupyterTerminal,
+    ListAssignmentsResponse, ListedAssignment, Outcome, RuntimeProxyInfo, Session, Shape, Variant,
 };
 use crate::config::ColabConfig;
 use crate::error::{ColabError, Result};
@@ -33,7 +33,7 @@ const XSSI_PREFIX: &[u8] = b")]}'\n";
 pub fn strip_xssi(s: &str) -> &str {
     let b = s.as_bytes();
     if b.len() >= XSSI_PREFIX.len() && &b[..XSSI_PREFIX.len()] == XSSI_PREFIX {
-        unsafe { std::str::from_utf8_unchecked(&b[XSSI_PREFIX.len()..]) }
+        &s[XSSI_PREFIX.len()..]
     } else {
         s
     }
@@ -250,16 +250,10 @@ impl ColabClient {
         file_path: &Path,
         progress: impl Fn(u64) + Send + 'static,
     ) -> Result<()> {
-        // url-encode each segment so paths with spaces work; keep `/` as-is
-        let encoded_path = remote_path
-            .trim_start_matches('/')
-            .split('/')
-            .map(|seg| urlencoding::encode(seg).into_owned())
-            .collect::<Vec<_>>()
-            .join("/");
         let url = format!(
-            "{}/api/contents/{encoded_path}",
-            proxy_url.trim_end_matches('/')
+            "{}/api/contents/{}",
+            proxy_url.trim_end_matches('/'),
+            encode_contents_path(remote_path),
         );
 
         let meta = std::fs::metadata(file_path)?;
@@ -349,6 +343,141 @@ impl ColabClient {
         Ok(())
     }
 
+    /// `GET /api/contents/<path>?content=0` — metadata only. Used to decide
+    /// whether to recurse into a directory or stream a single file.
+    pub async fn stat_contents(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+        remote_path: &str,
+    ) -> Result<ContentsEntry> {
+        let url = format!(
+            "{}/api/contents/{}?content=0",
+            proxy_url.trim_end_matches('/'),
+            encode_contents_path(remote_path),
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .send()
+            .await?;
+        let resp = self.check_status_raw(resp, &url).await?;
+        Ok(resp.json().await?)
+    }
+
+    /// `GET /api/contents/<path>` with default `content=1` for a directory.
+    /// Returns the directory entry whose `content` field is the child list.
+    pub async fn list_directory(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+        remote_path: &str,
+    ) -> Result<Vec<ContentsEntry>> {
+        let url = format!(
+            "{}/api/contents/{}",
+            proxy_url.trim_end_matches('/'),
+            encode_contents_path(remote_path),
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .send()
+            .await?;
+        let resp = self.check_status_raw(resp, &url).await?;
+        let entry: ContentsEntry = resp.json().await?;
+        if !entry.is_directory() {
+            return Err(ColabError::parse(format!(
+                "expected directory at {remote_path}, got {}",
+                entry.kind
+            )));
+        }
+        match entry.content {
+            Some(serde_json::Value::Array(items)) => items
+                .into_iter()
+                .map(|v| {
+                    serde_json::from_value::<ContentsEntry>(v)
+                        .map_err(|e| ColabError::parse(format!("bad directory entry: {e}")))
+                })
+                .collect(),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// Stream a single remote file to `local_path`, decoding base64 as
+    /// response bytes arrive so we never materialise the full file in RAM.
+    /// `progress` receives the running count of decoded bytes written.
+    pub async fn download_file_streaming(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+        remote_path: &str,
+        local_path: &Path,
+        progress: impl Fn(u64) + Send + 'static,
+    ) -> Result<u64> {
+        let url = format!(
+            "{}/api/contents/{}?type=file&format=base64",
+            proxy_url.trim_end_matches('/'),
+            encode_contents_path(remote_path),
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .send()
+            .await?;
+        let mut resp = self.check_status_raw(resp, &url).await?;
+
+        if let Some(parent) = local_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // The response is a single JSON object where `content` is a base64
+        // string. We accumulate chunks into a byte buffer, then do one
+        // scan to locate the content field and base64-decode it in one
+        // pass. For very large files this peaks at ~1.33x file size in
+        // RAM (base64 overhead); acceptable for typical notebook artifacts
+        // and dramatically simpler than incremental JSON+base64 parsing.
+        let mut body = Vec::new();
+        while let Some(chunk) = resp.chunk().await? {
+            body.extend_from_slice(&chunk);
+        }
+
+        let parsed: ContentsEntry = serde_json::from_slice(&body)
+            .map_err(|e| ColabError::parse(format!("contents response: {e}")))?;
+
+        let content_str = match parsed.content {
+            Some(serde_json::Value::String(s)) => s,
+            _ => {
+                return Err(ColabError::parse(format!(
+                    "expected base64 file content at {remote_path}"
+                )));
+            }
+        };
+
+        // Jupyter base64 payloads often contain newlines — strip whitespace
+        // before decoding so `general_purpose::STANDARD` is happy.
+        let cleaned: String = content_str.chars().filter(|c| !c.is_whitespace()).collect();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(cleaned.as_bytes())
+            .map_err(|e| ColabError::parse(format!("base64 decode: {e}")))?;
+
+        let total = decoded.len() as u64;
+        std::fs::write(local_path, &decoded)?;
+        progress(total);
+        Ok(total)
+    }
+
     pub async fn send_keep_alive(&self, endpoint: &str) -> Result<()> {
         let url = self.colab_url(format!("{TUN_PREFIX}/{endpoint}/keep-alive/"));
         self.colab_request(
@@ -425,6 +554,18 @@ impl ColabClient {
             ColabError::parse(format!("failed to parse API response: {e}\nbody: {body}"))
         })
     }
+}
+
+/// Percent-encode each path segment for the Jupyter Contents API.
+/// `/` stays as-is so nested paths still route correctly; leading `/`
+/// is stripped because the API expects relative paths.
+fn encode_contents_path(remote_path: &str) -> String {
+    remote_path
+        .trim_start_matches('/')
+        .split('/')
+        .map(|seg| urlencoding::encode(seg).into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 #[doc(hidden)]

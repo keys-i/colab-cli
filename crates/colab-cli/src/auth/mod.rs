@@ -1,7 +1,7 @@
 pub mod oauth;
 pub mod storage;
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use chrono::Utc;
 
@@ -20,10 +20,16 @@ fn token_cache() -> &'static Mutex<Option<StoredAccessToken>> {
     TOKEN_CACHE.get_or_init(|| Mutex::new(None))
 }
 
+fn token_cache_lock() -> Result<MutexGuard<'static, Option<StoredAccessToken>>> {
+    token_cache()
+        .lock()
+        .map_err(|_| ColabError::config("token cache poisoned"))
+}
+
 pub async fn get_access_token(config: &ColabConfig) -> Result<String> {
     // cache
     {
-        let guard = token_cache().lock().expect("token cache poisoned");
+        let guard = token_cache_lock()?;
         if let Some(stored) = guard.as_ref() {
             let remaining = stored.expires_at - Utc::now();
             if remaining.num_seconds() > REFRESH_MARGIN_SECS {
@@ -37,7 +43,7 @@ pub async fn get_access_token(config: &ColabConfig) -> Result<String> {
         let remaining = stored.expires_at - Utc::now();
         if remaining.num_seconds() > REFRESH_MARGIN_SECS {
             let token = stored.access_token.clone();
-            *token_cache().lock().expect("token cache poisoned") = Some(stored);
+            *token_cache_lock()? = Some(stored);
             return Ok(token);
         }
     }
@@ -48,7 +54,7 @@ pub async fn get_access_token(config: &ColabConfig) -> Result<String> {
     }
     let token = oauth::refresh_access_token(config).await?;
     if let Some(stored) = TokenStorage::get_access_token()? {
-        *token_cache().lock().expect("token cache poisoned") = Some(stored);
+        *token_cache_lock()? = Some(stored);
     }
     Ok(token)
 }

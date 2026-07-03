@@ -1,6 +1,8 @@
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use uuid::Uuid;
 
+use clap::Parser;
+use colab_cli::cli::Cli;
 use colab_cli::client::api::{Shape, Variant};
 use colab_cli::client::{build_assign_url, strip_xssi, uuid_to_websafe_base64};
 use colab_cli::ui::ccu_rate;
@@ -122,6 +124,25 @@ fn bench_ccu_rate_lookup(c: &mut Criterion) {
     });
 }
 
+fn bench_command_parse_smoke(c: &mut Criterion) {
+    c.bench_function("command_parse_smoke", |b| {
+        b.iter(|| {
+            Cli::try_parse_from(black_box([
+                "colab-cli",
+                "exec",
+                "run",
+                "train.py",
+                "--session",
+                "trainer",
+                "--",
+                "--epochs",
+                "3",
+            ]))
+            .unwrap()
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_strip_xssi,
@@ -130,5 +151,6 @@ criterion_group!(
     bench_variant_serde,
     bench_shape_roundtrip,
     bench_ccu_rate_lookup,
+    bench_command_parse_smoke,
 );
 criterion_main!(benches);

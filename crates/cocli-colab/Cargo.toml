@@ -1,0 +1,23 @@
+[package]
+name = "cocli-colab"
+version = "0.2.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Colab request helpers and command snippets for colab-cli."
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include = ["src/**/*.rs", "Cargo.toml", "README.md"]
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true
+

@@ -21,14 +21,12 @@ impl Ui {
             return None;
         }
         let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::with_template("{spinner:.cyan} {msg}")
-                .unwrap()
-                .tick_strings(&[
-                    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}",
-                    "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
-                ]),
-        );
+        if let Ok(style) = ProgressStyle::with_template("{spinner:.cyan} {msg}") {
+            pb.set_style(style.tick_strings(&[
+                "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}",
+                "\u{2827}", "\u{2807}", "\u{280f}",
+            ]));
+        }
         pb.set_message(msg.to_string());
         pb.enable_steady_tick(std::time::Duration::from_millis(80));
         Some(pb)

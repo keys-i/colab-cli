@@ -331,13 +331,73 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "cocli-colab"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "url",
+]
+
+[[package]]
+name = "cocli-core"
+version = "0.2.0"
+dependencies = [
+ "criterion",
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
+name = "cocli-fs"
+version = "0.2.0"
+dependencies = [
+ "cocli-protocol",
+ "criterion",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "cocli-protocol"
+version = "0.2.0"
+dependencies = [
+ "criterion",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "cocli-tools"
+version = "0.2.0"
+dependencies = [
+ "cocli-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "colab-cli"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "base64",
  "chrono",
  "clap",
  "clap_complete",
+ "cocli-colab",
+ "cocli-core",
+ "cocli-fs",
+ "cocli-protocol",
+ "cocli-tools",
  "colored",
  "criterion",
  "crossterm",

@@ -208,6 +208,36 @@ pub struct JupyterTerminal {
     pub name: String,
 }
 
+/// Jupyter Contents API entry. Returned by `GET /api/contents/<path>`.
+///
+/// For `type = "file"` with `format = "base64"`, `content` is a base64
+/// string. For `type = "directory"`, `content` is a JSON array of child
+/// entries (each with their own name/path/type). With `content=0` query
+/// the server omits `content` entirely and returns just metadata.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ContentsEntry {
+    pub name: String,
+    pub path: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub content: Option<serde_json::Value>,
+}
+
+impl ContentsEntry {
+    pub fn is_file(&self) -> bool {
+        self.kind == "file" || self.kind == "notebook"
+    }
+
+    pub fn is_directory(&self) -> bool {
+        self.kind == "directory"
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CcuInfo {

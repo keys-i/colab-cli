@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,16 +38,11 @@ impl ServerStorage {
     }
 
     pub fn list(&self) -> Result<Vec<StoredServer>> {
-        if let Some(cached) = self
-            .cache
-            .lock()
-            .expect("server storage cache poisoned")
-            .as_ref()
-        {
+        if let Some(cached) = self.cache_lock()?.as_ref() {
             return Ok(cached.clone());
         }
         let fresh = self.read_from_disk()?;
-        *self.cache.lock().expect("server storage cache poisoned") = Some(fresh.clone());
+        *self.cache_lock()? = Some(fresh.clone());
         Ok(fresh)
     }
 
@@ -116,8 +111,14 @@ impl ServerStorage {
         std::fs::write(&tmp, &json)?;
         std::fs::rename(&tmp, &self.path)?;
         // keep the cache in sync with what we just wrote
-        *self.cache.lock().expect("server storage cache poisoned") = Some(sorted);
+        *self.cache_lock()? = Some(sorted);
         Ok(())
+    }
+
+    fn cache_lock(&self) -> Result<MutexGuard<'_, Option<Vec<StoredServer>>>> {
+        self.cache
+            .lock()
+            .map_err(|_| ColabError::config("server storage cache poisoned"))
     }
 }
 

@@ -13,8 +13,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  publish-crate:
-    name: Publish to crates.io
+  package:
+    name: Package dry-run
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -23,13 +23,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Bake credentials into src/embedded.rs
+      - name: Build release with optional embedded credentials
         env:
           COLAB_EXTENSION_CLIENT_ID: ${{ secrets.COLAB_EXTENSION_CLIENT_ID }}
           COLAB_EXTENSION_CLIENT_NOT_SO_SECRET: ${{ secrets.COLAB_EXTENSION_CLIENT_NOT_SO_SECRET }}
-        run: cargo build --release --locked
+        run: cargo build --workspace --release --locked
 
-      - name: cargo publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --locked --allow-dirty
+      - name: cargo package
+        run: cargo package --workspace --allow-dirty
+
+      - name: publish dry-run
+        run: |
+          cargo publish --dry-run -p cocli-protocol
+          cargo publish --dry-run -p cocli-core
+          cargo publish --dry-run -p cocli-colab
+          cargo publish --dry-run -p cocli-fs
+          cargo publish --dry-run -p cocli-tools
+          cargo publish --dry-run -p colab-cli
