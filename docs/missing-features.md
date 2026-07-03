@@ -3,7 +3,7 @@
 | Project | Missing feature | User pain | Competitor has it? | Add/defer/remove | Reason |
 |---|---|---|---|---|---|
 | cocli | remote manifest cache for no-op sync | cannot prove unchanged-tree transfer savings locally | rsync-like tools do | defer | needs real remote cache/API test |
-| cocli | `config locate` | users search for config path wording | n/a | add | cheap alias to existing `config path` |
+| cocli | `settings locate` | users search for settings path wording | n/a | add | cheap alias to existing `settings path` |
 | cocli | `fs sync --explain` | risky sync needs plain-language preview | rsync has dry-run output | add | no new sync engine |
 | cocli | `logs tail` | long jobs need live logs | google-colab-cli has log export | defer | needs real runtime stream test |
 | cocli | `artifacts pull --latest` | users want latest outputs | manual workflows do | defer | continuation artifacts need stable latest index |

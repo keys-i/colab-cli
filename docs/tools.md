@@ -1,34 +1,55 @@
-# Tools
+# Skills
 
-The built-in registry lives in `src/cocli/tools/registry.rs`.
-
-Built-ins:
-
-- `session_new`
-- `session_status`
-- `exec_python`
-- `exec_notebook`
-- `fs_list`
-- `fs_push`
-- `fs_pull`
-- `env_install`
-- `continue_save`
-- `continue_resume`
-- `runtime_info`
-- `doctor`
-
-Inspect tools:
+The old top-level tool surface moved under settings:
 
 ```sh
-colab-cli tools list --json
-colab-cli tools inspect fs_push --json
-colab-cli tools run fs_push --json '{"src":"./data.csv","dest":"/content/data.csv"}'
+colab-cli settings skills list
+colab-cli settings skills inspect fs.push
+colab-cli settings skills run fs.push --json '{"src":"./data.csv","dest":"/content/data.csv"}'
 ```
 
-`tools run` returns a JSON plan. It does not execute hidden agent actions.
+The registry is small and built in. It exists so humans and agents can inspect safe command plans without loading network clients.
 
-Deferred:
+## Names
 
-- external plugin loading
-- MCP server
-- plugin marketplace
+- `session.new`
+- `session.status`
+- `run.python`
+- `run.notebook`
+- `run.install`
+- `fs.list`
+- `fs.push`
+- `fs.pull`
+- `drive.mount`
+- `continue.save`
+- `continue.resume`
+- `runtime.info`
+- `status.check`
+
+## Human Output
+
+```text
+Skill              Risk     Needs session Network Dry-run Summary
+session.new        medium   no            yes     yes     Start a Colab runtime
+run.python         medium   yes           yes     yes     Run Python code
+fs.push            medium   yes           yes     yes     Upload files
+status.check       low      no            no      yes     Check local setup
+```
+
+## JSON Shape
+
+```json
+[
+  {
+    "name": "session.new",
+    "category": "session",
+    "risk": "medium",
+    "needs_session": false,
+    "network": true,
+    "dry_run": true,
+    "summary": "Start a runtime"
+  }
+]
+```
+
+External plugin loading is deferred. There is no tested external plugin contract yet.

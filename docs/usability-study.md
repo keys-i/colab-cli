@@ -21,7 +21,7 @@ Targets:
 | Existing session run | use last session and run command | time, command length, errors |
 | File sync dry-run | see changed files before upload | time, output clarity, JSON validity |
 | Resume preview | inspect latest continuation and dry-run resume | lost-work estimate, confusion points |
-| Diagnose missing auth | run doctor and pick next command | time to next action, false positives |
+| Diagnose missing auth | run status quick and pick next command | time to next action, false positives |
 
 ## Shipyard Tasks
 
@@ -37,10 +37,10 @@ Targets:
 
 | Heuristic | cocli Check | Shipyard Check |
 |---|---|---|
-| Visibility of status | doctor/plan output shows state | plan/status/safety output |
+| Visibility of status | status/plan output shows state | plan/status/safety output |
 | Match user language | session, fs, continue | plan, release, publish |
 | User control | dry-run and explicit `--yes` | dry-run and explicit `--yes` |
 | Consistency | `<major> <command>` | flat release commands |
 | Error prevention | compliance refusal, redaction | dirty-tree and PR publish refusal |
-| Recognition over recall | `session last`, `config locate` | `plan --why`, `config explain` |
+| Recognition over recall | `session last`, `settings locate` | `plan --why`, `config explain` |
 | Minimalism | short tables and JSON | short release output |

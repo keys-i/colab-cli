@@ -35,7 +35,7 @@ Table:
 
 ```text
 name       status   next
-trainer    ready    exec run
+trainer    ready    run script
 ```
 
 No giant banners. Animal/fun lines never appear in JSON, quiet output, security failures, auth failures, or data-loss paths.

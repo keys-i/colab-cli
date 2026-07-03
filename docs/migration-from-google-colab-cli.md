@@ -14,10 +14,10 @@ New forms:
 
 ```sh
 colab-cli session new --name trainer --gpu A100
-colab-cli exec run train.py --session trainer
+colab-cli run script train.py --session trainer
 colab-cli fs push ./data.csv /content/data.csv --session trainer
 colab-cli fs pull /content/out ./out --session trainer
-colab-cli mount drive --session trainer
+colab-cli fs drive mount --session trainer
 ```
 
 Cheap compatibility aliases are kept for `new`, `sessions`, `status`, `stop`, `upload`, and `download`. They print migration hints.

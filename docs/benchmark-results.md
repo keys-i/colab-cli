@@ -34,7 +34,7 @@ Run local benchmarks with:
 | Scenario | Tool | Time | Memory | Commands | Bytes | Output lines | Errors | Notes |
 |---|---|---:|---:|---:|---:|---:|---:|---|
 | startup help | cocli | 1.38 ms median | n/a | 1 | n/a | help text | 0 | local release binary, hyperfine |
-| doctor quick | cocli | 1.54 ms median | n/a | 1 | n/a | compact JSON | 0 | local release binary, hyperfine |
+| status quick | cocli | 1.54 ms median | n/a | 1 | n/a | compact JSON | 0 | local release binary, hyperfine |
 | fs sync dry-run | cocli | 1.64 ms median | n/a | 1 | local only | JSON only | 0 | remote manifest cache not implemented |
 | release name | Shipyard | 2.54 ms median | n/a | 1 | n/a | 1 | 0 | local release binary, hyperfine |
 | release bench | Shipyard | 173.58 ms median | n/a | 1 | n/a | short | 0 | release-plz not installed |

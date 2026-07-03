@@ -6,21 +6,26 @@ use colab_cli::cocli::cli::args::Cli;
 #[test]
 fn parses_major_command_spaces() {
     for args in [
-        ["colab-cli", "auth", "list"].as_slice(),
         ["colab-cli", "session", "last"].as_slice(),
-        ["colab-cli", "exec", "last", "--confirm"].as_slice(),
+        ["colab-cli", "run", "last", "--confirm"].as_slice(),
+        ["colab-cli", "run", "py", "--code", "print(1)"].as_slice(),
+        ["colab-cli", "run", "notebook", "report.ipynb"].as_slice(),
+        ["colab-cli", "run", "install", "torch"].as_slice(),
         ["colab-cli", "fs", "changed", ".", "/content"].as_slice(),
-        ["colab-cli", "mount", "list"].as_slice(),
-        ["colab-cli", "env", "freeze"].as_slice(),
-        ["colab-cli", "runtime", "fit", "--model", "llama-7b"].as_slice(),
-        ["colab-cli", "slurp", "schema"].as_slice(),
+        ["colab-cli", "fs", "drive", "mount"].as_slice(),
+        ["colab-cli", "fs", "drive", "status"].as_slice(),
+        ["colab-cli", "status", "runtime", "--gpu"].as_slice(),
+        ["colab-cli", "status", "runtime", "--tpu"].as_slice(),
+        ["colab-cli", "status", "runtime", "--versions"].as_slice(),
+        ["colab-cli", "status", "runtime", "--backend"].as_slice(),
+        ["colab-cli", "status", "check"].as_slice(),
+        ["colab-cli", "slurp", "explain"].as_slice(),
         ["colab-cli", "fleet", "plan"].as_slice(),
-        ["colab-cli", "tools", "list"].as_slice(),
-        ["colab-cli", "agent", "tools"].as_slice(),
+        ["colab-cli", "settings", "skills", "list"].as_slice(),
+        ["colab-cli", "settings", "skills", "inspect", "session.new"].as_slice(),
         ["colab-cli", "continue", "last"].as_slice(),
-        ["colab-cli", "config", "path"].as_slice(),
-        ["colab-cli", "config", "locate"].as_slice(),
-        ["colab-cli", "doctor", "quick"].as_slice(),
+        ["colab-cli", "settings", "path"].as_slice(),
+        ["colab-cli", "settings", "locate"].as_slice(),
         ["colab-cli", "release", "name", "v0.4.2"].as_slice(),
     ] {
         Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
@@ -28,8 +33,39 @@ fn parses_major_command_spaces() {
 }
 
 #[test]
+fn top_level_help_has_final_command_spaces() {
+    let out = bin().arg("--help").output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    for name in [
+        "session", "run", "fs", "status", "continue", "slurp", "fleet", "settings", "release",
+    ] {
+        assert!(stdout.contains(name), "{name}");
+    }
+    for old in [
+        "exec", "env", "mount", "runtime", "tools", "config", "doctor",
+    ] {
+        assert!(!stdout.contains(&format!("  {old}")), "{old}");
+    }
+}
+
+#[test]
+fn hidden_aliases_parse_for_one_cycle() {
+    for args in [
+        ["colab-cli", "doctor"].as_slice(),
+        ["colab-cli", "runtime", "gpu"].as_slice(),
+        ["colab-cli", "tools", "list"].as_slice(),
+        ["colab-cli", "config", "path"].as_slice(),
+        ["colab-cli", "env", "install", "torch"].as_slice(),
+        ["colab-cli", "exec", "py", "--code", "print(1)"].as_slice(),
+    ] {
+        Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+    }
+}
+
+#[test]
 fn json_output_has_no_ansi() {
-    let out = bin().args(["--json", "doctor", "quick"]).output().unwrap();
+    let out = bin().args(["--json", "status", "quick"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(!stdout.contains("\x1b["));
@@ -38,13 +74,10 @@ fn json_output_has_no_ansi() {
 
 #[test]
 fn quiet_suppresses_vibe_art() {
-    let out = bin()
-        .args(["--quiet", "doctor", "--vibe"])
-        .output()
-        .unwrap();
+    let out = bin().args(["--quiet", "doctor"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(!stdout.contains("/\\_/\\"));
+    assert!(!stdout.contains("moved:"));
 }
 
 #[test]
@@ -54,6 +87,7 @@ fn docs_exist() {
         "docs/prune-report.md",
         "docs/easter-eggs.md",
         "docs/research.md",
+        "docs/command-audit.md",
         "plan.md",
     ] {
         assert!(std::path::Path::new(path).exists(), "{path}");
@@ -64,12 +98,41 @@ fn docs_exist() {
 fn config_open_prints_path_without_editor() {
     let out = bin()
         .env_remove("EDITOR")
-        .args(["config", "open"])
+        .args(["settings", "edit"])
         .output()
         .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("config.toml"));
+}
+
+#[test]
+fn settings_skills_list_is_catalog_not_debug_rows() {
+    let out = bin().args(["settings", "skills", "list"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("Skill"));
+    assert!(stdout.contains("session.new"));
+    assert!(stdout.contains("run.python"));
+    assert!(!stdout.contains("session_new"));
+    assert!(!stdout.contains("session=false"));
+}
+
+#[test]
+fn settings_skills_json_has_stable_fields() {
+    let out = bin()
+        .args(["--json", "settings", "skills", "list"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(!stdout.contains("\x1b["));
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let first = value.as_array().unwrap().first().unwrap();
+    assert!(first.get("name").is_some());
+    assert!(first.get("category").is_some());
+    assert!(first.get("risk").is_some());
+    assert!(first.get("needs_session").is_some());
 }
 
 #[test]

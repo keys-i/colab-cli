@@ -3,37 +3,41 @@
 Command shape:
 
 ```text
-colab-cli <major-space> <command> <flags>
+colab-cli <space> <command> <flags>
 ```
 
-Major spaces: `auth`, `session`, `exec`, `fs`, `mount`, `env`, `runtime`, `slurp`, `fleet`, `tools`, `agent`, `continue`, `config`, `doctor`, `release`.
+Public spaces: `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `settings`, `release`.
+
+Hidden aliases exist for one migration cycle where they are cheap. They do not appear in normal help.
 
 ## Session
 
 ```sh
 colab-cli session new --name trainer --gpu A100
 colab-cli session list
-colab-cli session status --session trainer
+colab-cli session last
 colab-cli session stop --session trainer
 colab-cli session url --session trainer --open
-colab-cli session last
 ```
 
-`server` still exists as a hidden compatibility group for the older Rust CLI.
-Use `--session -` to target the last local session where a command accepts `--session`.
+Use `status session` for session details.
 
-## Exec
+## Run
 
 ```sh
-colab-cli exec run train.py --session trainer -- arg1 arg2
-colab-cli exec py --session trainer --code "print(1)"
-colab-cli exec nb notebook.ipynb --session trainer --out executed.ipynb
-colab-cli exec repl --session trainer
-colab-cli exec shell --session trainer
-colab-cli exec last --confirm
+colab-cli run py --session trainer --code "print(1)"
+colab-cli run script train.py --session trainer -- --epochs 3
+colab-cli run notebook report.ipynb --session trainer --out report.out.ipynb
+colab-cli run repl --session trainer
+colab-cli run shell --session trainer
+colab-cli run install torch transformers --session trainer
+colab-cli run install -r requirements.txt --session trainer
+colab-cli run freeze --session trainer
+colab-cli run restore requirements.txt --session trainer
+colab-cli run last --confirm
 ```
 
-`exec run` currently executes the path on the remote runtime. Push local files first with `fs push`.
+`run script` executes the path on the remote runtime. Push local files first with `fs push`.
 
 ## Fs
 
@@ -45,30 +49,36 @@ colab-cli fs rm /content/tmp --recursive --yes
 colab-cli fs sync ./src /content/src --dry-run
 colab-cli fs diff ./src /content/src
 colab-cli fs changed ./src /content/src
+colab-cli fs drive mount --session trainer --path /content/drive
+colab-cli fs drive status --session trainer
+colab-cli fs drive path --session trainer
 ```
 
 `fs rm` requires `--yes`. `fs sync` is dry-run planning in this release.
 
-## Runtime
+## Status
 
 ```sh
-colab-cli runtime info
-colab-cli runtime info --backend
-colab-cli runtime fit --model llama-7b
+colab-cli status
+colab-cli status quick
+colab-cli status check
+colab-cli status session --name trainer
+colab-cli status runtime --all
+colab-cli status runtime --backend
+colab-cli status runtime --gpu
+colab-cli status runtime --tpu
+colab-cli status runtime --versions
+colab-cli status runtime --fit llama-7b
+colab-cli status auth
+colab-cli status fs
+colab-cli status drive
+colab-cli status slurp
+colab-cli status fleet
+colab-cli status run
+colab-cli status paths
 ```
 
-`runtime fit` is a rough local heuristic: `probably-fits`, `tight`, `nope`, or `unknown`.
-
-## Slurp And Fleet
-
-```sh
-colab-cli slurp init
-colab-cli slurp explain
-colab-cli slurp doctor
-colab-cli fleet plan --config slurp.toml --cost
-```
-
-Fleet execution is deferred. Planning and compliance checks are local and do not bypass Colab rules.
+`status quick` is the short local check. It should print one useful next action.
 
 ## Continue
 
@@ -85,14 +95,38 @@ colab-cli continue clean --older-than 7d
 
 Resume replays manifest steps. It does not restore live Python variables.
 
-## Doctor And Config
+## Slurp And Fleet
 
 ```sh
-colab-cli doctor quick
-colab-cli doctor paths
-colab-cli doctor mounts
-colab-cli doctor env
-colab-cli doctor --vibe
-colab-cli config open
-colab-cli bug-report
+colab-cli slurp init
+colab-cli slurp explain
+colab-cli fleet plan --config slurp.toml --cost
+```
+
+Fleet execution is deferred. Planning and compliance checks are local and do not bypass Colab rules.
+
+## Settings
+
+```sh
+colab-cli settings get
+colab-cli settings set ui.fun true
+colab-cli settings path
+colab-cli settings edit
+colab-cli settings skills list
+colab-cli settings skills inspect session.new
+colab-cli settings skills run fs.push --json '{"src":"./data.csv","dest":"/content/data.csv"}'
+```
+
+Skills are built-in command plans. This is not a plugin marketplace.
+
+## Migration Aliases
+
+```text
+exec      -> run
+env       -> run install/freeze/restore
+mount     -> fs drive
+runtime   -> status runtime
+tools     -> settings skills
+config    -> settings
+doctor    -> status check
 ```

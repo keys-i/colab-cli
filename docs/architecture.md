@@ -26,8 +26,8 @@ src/cocli/
   slurp/      Slurp TOML parsing and explanation
   fleet/      compliance checks and scheduler planning
   continue/   continuation manifest and resume planning
-  tools/      small built-in registry used by agent commands
-  config/     config files and UI config
+  tools/      built-in registry shown through settings skills
+  config/     config files behind settings
   release/    release names and notes helpers
   ui/         terminal output
   util/       ids, paths, time, JSON helpers

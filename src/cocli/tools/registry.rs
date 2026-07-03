@@ -27,6 +27,7 @@ pub enum BuiltinTool {
     FsPush,
     FsPull,
     EnvInstall,
+    DriveMount,
     ContinueSave,
     ContinueResume,
     RuntimeInfo,
@@ -34,7 +35,7 @@ pub enum BuiltinTool {
 }
 
 impl BuiltinTool {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::SessionNew,
         Self::SessionStatus,
         Self::ExecPython,
@@ -43,6 +44,7 @@ impl BuiltinTool {
         Self::FsPush,
         Self::FsPull,
         Self::EnvInstall,
+        Self::DriveMount,
         Self::ContinueSave,
         Self::ContinueResume,
         Self::RuntimeInfo,
@@ -50,6 +52,30 @@ impl BuiltinTool {
     ];
 
     pub fn name(self) -> &'static str {
+        match self {
+            Self::SessionNew => "session.new",
+            Self::SessionStatus => "session.status",
+            Self::ExecPython => "run.python",
+            Self::ExecNotebook => "run.notebook",
+            Self::FsList => "fs.list",
+            Self::FsPush => "fs.push",
+            Self::FsPull => "fs.pull",
+            Self::EnvInstall => "run.install",
+            Self::DriveMount => "drive.mount",
+            Self::ContinueSave => "continue.save",
+            Self::ContinueResume => "continue.resume",
+            Self::RuntimeInfo => "runtime.info",
+            Self::Doctor => "status.check",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|t| t.name() == name || t.legacy_name() == name)
+    }
+
+    fn legacy_name(self) -> &'static str {
         match self {
             Self::SessionNew => "session_new",
             Self::SessionStatus => "session_status",
@@ -59,15 +85,12 @@ impl BuiltinTool {
             Self::FsPush => "fs_push",
             Self::FsPull => "fs_pull",
             Self::EnvInstall => "env_install",
+            Self::DriveMount => "drive_mount",
             Self::ContinueSave => "continue_save",
             Self::ContinueResume => "continue_resume",
             Self::RuntimeInfo => "runtime_info",
             Self::Doctor => "doctor",
         }
-    }
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|t| t.name() == name)
     }
 
     pub fn spec(self) -> ToolSpec {
@@ -128,6 +151,13 @@ impl BuiltinTool {
                 true,
                 false,
             ),
+            Self::DriveMount => (
+                "mount Google Drive in a session",
+                RiskLevel::Network,
+                true,
+                true,
+                false,
+            ),
             Self::ContinueSave => (
                 "write a continuation manifest",
                 RiskLevel::Low,
@@ -181,9 +211,9 @@ impl BuiltinTool {
                 }
                 cmd
             }
-            Self::SessionStatus => session_cmd("session", "status", get("session")),
-            Self::ExecPython => session_cmd("exec", "py", get("session")),
-            Self::ExecNotebook => session_cmd("exec", "nb", get("session")),
+            Self::SessionStatus => session_cmd("status", "session", get("session")),
+            Self::ExecPython => session_cmd("run", "py", get("session")),
+            Self::ExecNotebook => session_cmd("run", "notebook", get("session")),
             Self::FsList => vec![
                 "fs".into(),
                 "ls".into(),
@@ -201,7 +231,14 @@ impl BuiltinTool {
                 get("src").unwrap_or("/content").into(),
                 get("dest").unwrap_or(".").into(),
             ],
-            Self::EnvInstall => session_cmd("env", "install", get("session")),
+            Self::EnvInstall => session_cmd("run", "install", get("session")),
+            Self::DriveMount => {
+                let mut cmd = vec!["fs".into(), "drive".into(), "mount".into()];
+                if let Some(session) = get("session") {
+                    cmd.extend(["--session".into(), session.into()]);
+                }
+                cmd
+            }
             Self::ContinueSave => {
                 let mut cmd = session_cmd("continue", "save", get("session"));
                 if let Some(name) = get("name") {
@@ -214,8 +251,8 @@ impl BuiltinTool {
                 "resume".into(),
                 get("name").unwrap_or("latest").into(),
             ],
-            Self::RuntimeInfo => vec!["runtime".into(), "info".into()],
-            Self::Doctor => vec!["doctor".into()],
+            Self::RuntimeInfo => vec!["status".into(), "runtime".into()],
+            Self::Doctor => vec!["status".into(), "check".into()],
         }
     }
 }
@@ -273,9 +310,10 @@ mod tests {
     #[test]
     fn registry_lists_requested_builtins() {
         let names: Vec<_> = ToolRegistry::specs().into_iter().map(|s| s.name).collect();
-        assert!(names.contains(&"session_new".into()));
-        assert!(names.contains(&"continue_resume".into()));
-        assert!(names.contains(&"doctor".into()));
+        assert!(names.contains(&"session.new".into()));
+        assert!(names.contains(&"continue.resume".into()));
+        assert!(names.contains(&"status.check".into()));
+        assert!(BuiltinTool::from_name("exec_python").is_some());
     }
 
     #[test]

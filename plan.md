@@ -17,11 +17,11 @@ It should make normal Colab work less annoying:
 ## What Done Looks Like
 
 - [ ] command space follows `colab-cli <space> <command> <flags>`
-- [ ] `session`, `exec`, `fs`, `runtime`, `continue`, `slurp`, and `doctor` cover the main path
+- [ ] `session`, `run`, `fs`, `status`, `continue`, `slurp`, and `settings` cover the main path
 - [ ] `fs sync --dry-run` is trustworthy
 - [ ] continuation is checkpoint/replay and says so clearly
 - [ ] Slurp config can be explained before it runs
-- [ ] doctor commands give one next action
+- [ ] status commands give one next action
 - [ ] JSON output has no ANSI
 - [ ] fun output never appears in CI, JSON, quiet mode, or serious errors
 - [ ] benchmarks compare against google-colab-cli and manual workflows
@@ -33,7 +33,7 @@ It should make normal Colab work less annoying:
 2. Make fs sync useful before making it fancy
 3. Keep continuation honest
 4. Make Slurp readable
-5. Make doctor good enough that users actually run it
+5. Make status checks good enough that users actually run them
 6. Benchmark before bragging
 7. Prune features that do not help the main workflow
 
@@ -58,7 +58,7 @@ It should make normal Colab work less annoying:
 ## Next Implementation Pass
 
 - clean up command aliases
-- make `doctor quick` tighter
+- make `status quick` tighter
 - make `fs changed` compare against a real remote/cache manifest
 - finish compact output style
 - finish `slurp explain`

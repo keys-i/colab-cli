@@ -109,7 +109,7 @@ impl Ui {
                 println!(
                     "{} No servers assigned. Run {} to assign one.",
                     "\u{00b7}".dimmed(),
-                    "colab-cli server assign".cyan().bold()
+                    "colab-cli session new".cyan().bold()
                 );
             }
             return;

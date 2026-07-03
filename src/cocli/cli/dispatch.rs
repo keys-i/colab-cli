@@ -7,10 +7,10 @@ use clap::{CommandFactory, Parser};
 use crate::cocli::auth;
 use crate::cocli::cli::{
     AgentCommands, AuthCommands, AuthProfileArgs, Cli, Commands, CompatTransferArgs,
-    ConfigCommands, ContinueCommands, DoctorCommands, EnvCommands, ExecCommands, FileCommands,
-    FleetCommands, FleetConfigArgs, FsCommands, FsDiffArgs, FsSyncArgs, MountCommands,
-    ReleaseCommands, RuntimeCommands, ServerCommands, SessionCommands, SessionNameArg,
-    SessionNewArgs, SlurpCommands, ToolsCommands,
+    ConfigCommands, ContinueCommands, EnvCommands, ExecCommands, FileCommands, FleetCommands,
+    FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, MountCommands,
+    ReleaseCommands, RunCommands, RuntimeCommands, ServerCommands, SessionCommands, SessionNameArg,
+    SessionNewArgs, SettingsCommands, SkillCommands, SlurpCommands, StatusCommands, ToolsCommands,
 };
 use crate::cocli::config::{self, ColabConfig};
 use crate::cocli::error::{ColabError, Result};
@@ -48,7 +48,7 @@ pub async fn main_entry() {
                 eprintln!("  Run `colab-cli auth login` to sign in.");
             }
             ColabError::TooManyAssignments => {
-                eprintln!("  Run `colab-cli server rm` to remove one.");
+                eprintln!("  Run `colab-cli session stop --name NAME` to remove one.");
             }
             _ => {}
         }
@@ -71,7 +71,12 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             let config = ColabConfig::load(cli.quiet)?;
             handle_session(command, &config, ui).await
         }
+        Commands::Run { command } => {
+            let config = ColabConfig::load(cli.quiet)?;
+            handle_run_space(command, &config, ui).await
+        }
         Commands::Exec { command } => {
+            migration(&ui, "colab-cli run ...");
             let config = ColabConfig::load(cli.quiet)?;
             handle_exec(command, &config, ui).await
         }
@@ -80,18 +85,28 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_fs(command, &config, ui, json).await
         }
         Commands::Mount { command } => {
+            migration(&ui, "colab-cli fs drive ...");
             let config = ColabConfig::load(cli.quiet)?;
             handle_mount(command, &config, ui).await
         }
         Commands::Env { command } => {
+            migration(&ui, "colab-cli run install/freeze/restore");
             let config = ColabConfig::load(cli.quiet)?;
             handle_env(command, &config, ui).await
         }
         Commands::Runtime { command } => {
+            migration(&ui, runtime_migration_target(&command));
             let config = ColabConfig::load(cli.quiet)?;
             handle_runtime(command, &config, ui, json).await
         }
-        Commands::Tools { command } => handle_tools(command, ui, json),
+        Commands::Status { command } => {
+            let config = ColabConfig::load(cli.quiet)?;
+            handle_status(command, &config, ui, json).await
+        }
+        Commands::Tools { command } => {
+            migration(&ui, "colab-cli settings skills ...");
+            handle_tools(command, ui, json)
+        }
         Commands::Fleet { command } => handle_fleet(command, ui, json),
         Commands::Slurp { command } => handle_slurp(command, ui, json),
         Commands::Release { command } => handle_release(command, json),
@@ -100,8 +115,16 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             let config = ColabConfig::load(cli.quiet)?;
             handle_continue(command, &config, ui, json).await
         }
-        Commands::Config { command } => handle_config(command, json),
-        Commands::Doctor { vibe, command } => handle_doctor(command, vibe, ui, json),
+        Commands::Settings { command } => handle_settings(command, ui, json),
+        Commands::Config { command } => {
+            migration(&ui, config_migration_target(&command));
+            handle_config(command, json)
+        }
+        Commands::Doctor { .. } => {
+            migration(&ui, "colab-cli status check");
+            let config = ColabConfig::load(cli.quiet)?;
+            handle_status(Some(StatusCommands::Check), &config, ui, json).await
+        }
         Commands::BugReport { show_private } => handle_bug_report(show_private, json),
         Commands::Server { command } => {
             let config = ColabConfig::load(cli.quiet)?;
@@ -112,40 +135,27 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_file(command, &config, ui).await
         }
         Commands::CompatNew(args) => {
-            migration(&ui, "colab new", "colab-cli session new");
+            migration(&ui, "colab-cli session new");
             let config = ColabConfig::load(cli.quiet)?;
             handle_session(SessionCommands::New(args), &config, ui).await
         }
         Commands::CompatSessions => {
-            migration(&ui, "colab sessions", "colab-cli session list");
+            migration(&ui, "colab-cli session list");
             let config = ColabConfig::load(cli.quiet)?;
             handle_session(SessionCommands::List, &config, ui).await
         }
-        Commands::CompatStatus(arg) => {
-            migration(&ui, "colab status", "colab-cli session status");
-            let config = ColabConfig::load(cli.quiet)?;
-            handle_session(SessionCommands::Status(arg), &config, ui).await
-        }
         Commands::CompatStop(arg) => {
-            migration(&ui, "colab stop", "colab-cli session stop");
+            migration(&ui, "colab-cli session stop");
             let config = ColabConfig::load(cli.quiet)?;
             handle_session(SessionCommands::Stop(arg), &config, ui).await
         }
         Commands::CompatUpload(args) => {
-            migration(
-                &ui,
-                "colab upload LOCAL REMOTE",
-                "colab-cli fs push LOCAL REMOTE",
-            );
+            migration(&ui, "colab-cli fs push LOCAL REMOTE");
             let config = ColabConfig::load(cli.quiet)?;
             compat_transfer(args, true, &config, ui).await
         }
         Commands::CompatDownload(args) => {
-            migration(
-                &ui,
-                "colab download REMOTE LOCAL",
-                "colab-cli fs pull REMOTE LOCAL",
-            );
+            migration(&ui, "colab-cli fs pull REMOTE LOCAL");
             let config = ColabConfig::load(cli.quiet)?;
             compat_transfer(args, false, &config, ui).await
         }
@@ -311,6 +321,7 @@ async fn handle_session(cmd: SessionCommands, config: &ColabConfig, ui: Ui) -> R
         }
         SessionCommands::List => handle_ls(config, ui).await,
         SessionCommands::Status(SessionNameArg { session }) => {
+            migration(&ui, "colab-cli status session --name NAME");
             handle_info(config, ui, session).await
         }
         SessionCommands::Stop(SessionNameArg { session }) => handle_rm(config, ui, session).await,
@@ -327,6 +338,99 @@ async fn handle_session(cmd: SessionCommands, config: &ColabConfig, ui: Ui) -> R
             ui.print_server_status(last);
             Ok(())
         }
+    }
+}
+
+async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+    match cmd {
+        RunCommands::Script {
+            script,
+            session,
+            args,
+        } => {
+            handle_exec(
+                ExecCommands::Run {
+                    script,
+                    session,
+                    args,
+                },
+                config,
+                ui,
+            )
+            .await
+        }
+        RunCommands::Py { session, code } => {
+            handle_exec(ExecCommands::Py { session, code }, config, ui).await
+        }
+        RunCommands::Notebook {
+            notebook,
+            session,
+            out,
+        } => {
+            handle_exec(
+                ExecCommands::Nb {
+                    notebook,
+                    session,
+                    out,
+                },
+                config,
+                ui,
+            )
+            .await
+        }
+        RunCommands::Repl { session } => {
+            handle_exec(ExecCommands::Repl { session }, config, ui).await
+        }
+        RunCommands::Shell { session } => {
+            handle_exec(ExecCommands::Shell { session }, config, ui).await
+        }
+        RunCommands::Install {
+            packages,
+            requirements,
+            session,
+        } => {
+            if let Some(requirements) = requirements {
+                if !packages.is_empty() {
+                    return Err(ColabError::config(
+                        "run install accepts packages or -r requirements.txt, not both",
+                    ));
+                }
+                handle_env(
+                    EnvCommands::Restore {
+                        requirements,
+                        session,
+                    },
+                    config,
+                    ui,
+                )
+                .await
+            } else {
+                handle_env(EnvCommands::Install { packages, session }, config, ui).await
+            }
+        }
+        RunCommands::Freeze { session } => {
+            handle_env(EnvCommands::Freeze { session }, config, ui).await
+        }
+        RunCommands::Restore {
+            requirements,
+            session,
+        } => {
+            handle_env(
+                EnvCommands::Restore {
+                    requirements,
+                    session,
+                },
+                config,
+                ui,
+            )
+            .await
+        }
+        RunCommands::Last { confirm } => {
+            handle_exec(ExecCommands::Last { confirm }, config, ui).await
+        }
+        RunCommands::History => Err(ColabError::config(
+            "run history has no command store yet - rerun commands explicitly",
+        )),
     }
 }
 
@@ -422,6 +526,79 @@ async fn handle_fs(cmd: FsCommands, config: &ColabConfig, ui: Ui, json: bool) ->
         FsCommands::Sync(args) => handle_fs_sync(args, ui, json),
         FsCommands::Diff(args) => handle_fs_diff(args, ui),
         FsCommands::Changed(args) => handle_fs_diff(args, ui),
+        FsCommands::Drive { command } => handle_fs_drive(command, config, ui, json).await,
+    }
+}
+
+async fn handle_fs_drive(
+    cmd: FsDriveCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+) -> Result<()> {
+    match cmd {
+        FsDriveCommands::Mount {
+            session,
+            path,
+            dry_run,
+        } => {
+            if dry_run {
+                return print_value(
+                    json,
+                    &serde_json::json!({
+                        "action": "drive.mount",
+                        "path": path,
+                        "needs_session": true,
+                        "would_execute": true
+                    }),
+                );
+            }
+            handle_mount(MountCommands::Drive { session, path }, config, ui).await
+        }
+        FsDriveCommands::Status { session, dry_run } => {
+            if dry_run {
+                return print_value(
+                    json,
+                    &serde_json::json!({
+                        "action": "drive.status",
+                        "needs_session": true,
+                        "next_action": "run `colab-cli fs drive mount --session NAME` if not mounted"
+                    }),
+                );
+            }
+            let code = "from pathlib import Path\np=Path('/content/drive')\nprint('mounted' if p.exists() and any(p.iterdir()) else 'not_mounted')".to_string();
+            handle_run(
+                config,
+                ui,
+                session,
+                vec!["python".into(), "-c".into(), code],
+            )
+            .await
+        }
+        FsDriveCommands::Unmount { session, dry_run } => {
+            if dry_run {
+                return print_value(
+                    json,
+                    &serde_json::json!({
+                        "action": "drive.unmount",
+                        "needs_session": true,
+                        "would_execute": true
+                    }),
+                );
+            }
+            let code = "from google.colab import drive\ndrive.flush_and_unmount()".to_string();
+            handle_run(
+                config,
+                ui,
+                session,
+                vec!["python".into(), "-c".into(), code],
+            )
+            .await
+        }
+        FsDriveCommands::Path { .. } => {
+            println!("/content/drive");
+            Ok(())
+        }
     }
 }
 
@@ -447,7 +624,9 @@ async fn handle_env(cmd: EnvCommands, config: &ColabConfig, ui: Ui) -> Result<()
     match cmd {
         EnvCommands::Install { packages, session } => {
             if packages.is_empty() {
-                return Err(ColabError::config("env install needs at least one package"));
+                return Err(ColabError::config(
+                    "run install needs packages or -r requirements.txt",
+                ));
             }
             handle_run(
                 config,
@@ -504,12 +683,12 @@ async fn handle_runtime(
         }
         RuntimeCommands::BackendInfo | RuntimeCommands::Versions => print_backend_info(json),
         RuntimeCommands::Gpu => {
-            ui.info("GPU details require a session; use `colab-cli exec py --code \"import torch; print(torch.cuda.get_device_name(0))\"`.");
+            ui.info("GPU details require a session; use `colab-cli run py --code \"import torch; print(torch.cuda.get_device_name(0))\"`.");
             Ok(())
         }
         RuntimeCommands::Tpu => {
             ui.info(
-                "TPU details require a session; use `colab-cli runtime info --backend` for package baselines.",
+                "TPU details require a session; use `colab-cli status runtime --backend` for package baselines.",
             );
             Ok(())
         }
@@ -542,48 +721,342 @@ fn runtime_fit(model: &str) -> &'static str {
     }
 }
 
-fn handle_tools(cmd: ToolsCommands, _ui: Ui, json: bool) -> Result<()> {
+async fn handle_status(
+    cmd: Option<StatusCommands>,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+) -> Result<()> {
     match cmd {
-        ToolsCommands::List { json: local_json } => {
-            let specs = crate::cocli::tools::ToolRegistry::specs();
-            if json || local_json {
-                print_value(true, &specs)
+        None => {
+            let auth_state = auth::current_account()?.map(|a| a.email);
+            print_value(
+                json,
+                &serde_json::json!({
+                    "session": "run `colab-cli session list`",
+                    "auth": auth_state.is_some(),
+                    "runtime": "run `colab-cli status runtime --all`",
+                    "files": "run `colab-cli fs changed LOCAL REMOTE`",
+                    "drive": "run `colab-cli fs drive status --session NAME`",
+                    "next_action": if auth_state.is_some() { "run `colab-cli session list`" } else { "run `colab-cli auth login`" }
+                }),
+            )
+        }
+        Some(StatusCommands::Session { name }) => handle_info(config, ui, name).await,
+        Some(StatusCommands::Runtime {
+            backend,
+            gpu,
+            tpu,
+            versions,
+            all,
+            fit,
+        }) => {
+            if let Some(model) = fit {
+                let verdict = runtime_fit(&model);
+                return print_value(json, &serde_json::json!({ "model": model, "fit": verdict }));
+            }
+            if backend || versions || all {
+                print_backend_info(json)?;
+            }
+            if gpu || all {
+                handle_runtime(RuntimeCommands::Gpu, config, ui, json).await?;
+            }
+            if tpu || all {
+                handle_runtime(RuntimeCommands::Tpu, config, ui, json).await?;
+            }
+            if !(backend || gpu || tpu || versions || all) {
+                handle_runtime(RuntimeCommands::Info { backend: false }, config, ui, json).await?;
+            }
+            Ok(())
+        }
+        Some(StatusCommands::Auth) => {
+            let auth_state = auth::current_account()?.map(|a| a.email);
+            print_value(
+                json,
+                &serde_json::json!({
+                    "signed_in": auth_state.is_some(),
+                    "email": auth_state.as_ref().map(|email| crate::cocli::auth::redaction::redacted_email(email, false)),
+                    "next_action": if auth_state.is_some() { "run `colab-cli session list`" } else { "run `colab-cli auth login`" }
+                }),
+            )
+        }
+        Some(StatusCommands::Fs) => print_value(
+            json,
+            &serde_json::json!({
+                "sync": "manifest dry-run available",
+                "next_action": "run `colab-cli fs changed LOCAL REMOTE`"
+            }),
+        ),
+        Some(StatusCommands::Drive) => print_value(
+            json,
+            &serde_json::json!({
+                "status": "needs live session",
+                "next_action": "run `colab-cli fs drive status --session NAME`"
+            }),
+        ),
+        Some(StatusCommands::Slurp { config }) => print_value(
+            json,
+            &serde_json::json!({
+                "config": config,
+                "exists": Path::new(&config).exists(),
+                "next_action": if Path::new(&config).exists() { "run `colab-cli slurp explain`" } else { "run `colab-cli slurp init`" }
+            }),
+        ),
+        Some(StatusCommands::Fleet { config }) => {
+            if Path::new(&config).exists() {
+                handle_fleet(
+                    FleetCommands::Plan(FleetConfigArgs {
+                        config,
+                        dry_run: true,
+                        cost: true,
+                        allow_fallback_account: false,
+                    }),
+                    ui,
+                    json,
+                )
             } else {
-                for spec in specs {
+                print_value(
+                    json,
+                    &serde_json::json!({
+                        "config": config,
+                        "exists": false,
+                        "next_action": "run `colab-cli slurp init`"
+                    }),
+                )
+            }
+        }
+        Some(StatusCommands::Quick) => {
+            let auth_state = auth::current_account()?.is_some();
+            print_value(
+                json,
+                &serde_json::json!({
+                    "auth": auth_state,
+                    "config": config::config_path().ok().map(|p| p.exists()).unwrap_or(false),
+                    "data_dir": config::data_dir().ok().map(|p| p.display().to_string()),
+                    "next_action": if auth_state { "run `colab-cli session list`" } else { "run `colab-cli auth login`" }
+                }),
+            )
+        }
+        Some(StatusCommands::Check) => {
+            let auth_state = auth::current_account()?.map(|a| a.email);
+            print_value(
+                json,
+                &serde_json::json!({
+                    "auth": auth_state.is_some(),
+                    "config_path": config::config_path().ok().map(|p| p.display().to_string()),
+                    "unsafe_code": "forbidden by package lints",
+                    "next_action": if auth_state.is_some() { "run `colab-cli status quick`" } else { "run `colab-cli auth login`" }
+                }),
+            )
+        }
+        Some(StatusCommands::Run) => print_value(
+            json,
+            &serde_json::json!({
+                "note": "runtime setup checks require a live session",
+                "next_action": "run `colab-cli run py --session NAME --code \"import sys; print(sys.version)\"`"
+            }),
+        ),
+        Some(StatusCommands::Paths) => print_value(
+            json,
+            &serde_json::json!({
+                "config_dir": config::config_dir().ok().map(|p| p.display().to_string()),
+                "data_dir": config::data_dir().ok().map(|p| p.display().to_string()),
+                "config_path": config::config_path().ok().map(|p| p.display().to_string())
+            }),
+        ),
+    }
+}
+
+fn handle_tools(cmd: ToolsCommands, ui: Ui, json: bool) -> Result<()> {
+    match cmd {
+        ToolsCommands::List { json: local_json } => handle_skills(
+            SkillCommands::List {
+                json: local_json,
+                category: None,
+                risk: None,
+                needs_session: false,
+            },
+            ui,
+            json,
+        ),
+        ToolsCommands::Inspect {
+            tool_name,
+            json: local_json,
+        } => handle_skills(
+            SkillCommands::Inspect {
+                name: tool_name,
+                json: local_json,
+            },
+            ui,
+            json,
+        ),
+        ToolsCommands::Run {
+            tool_name,
+            input_json,
+            yes,
+        } => handle_skills(
+            SkillCommands::Run {
+                name: tool_name,
+                input_json,
+                yes,
+            },
+            ui,
+            json,
+        ),
+    }
+}
+
+fn handle_settings(cmd: SettingsCommands, ui: Ui, json: bool) -> Result<()> {
+    match cmd {
+        SettingsCommands::Get => handle_config(ConfigCommands::Get, json),
+        SettingsCommands::Set { key, value } => {
+            handle_config(ConfigCommands::Set { key, value }, json)
+        }
+        SettingsCommands::Path => handle_config(ConfigCommands::Path, json),
+        SettingsCommands::Edit => handle_config(ConfigCommands::Open, json),
+        SettingsCommands::Reset { yes } => {
+            if !yes {
+                return Err(ColabError::config(
+                    "settings reset needs --yes; it rewrites the local UI config",
+                ));
+            }
+            let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
+            config::CocliConfig::default()
+                .save(&path)
+                .map_err(|e| ColabError::config(e.to_string()))?;
+            ui.success("settings reset");
+            Ok(())
+        }
+        SettingsCommands::Skills { command } => handle_skills(command, ui, json),
+    }
+}
+
+fn handle_skills(cmd: SkillCommands, _ui: Ui, json: bool) -> Result<()> {
+    match cmd {
+        SkillCommands::List {
+            json: local_json,
+            category,
+            risk,
+            needs_session,
+        } => {
+            let rows = skill_rows(category.as_deref(), risk.as_deref(), needs_session);
+            if json || local_json {
+                print_value(true, &rows)
+            } else {
+                println!(
+                    "{:<18} {:<8} {:<13} {:<7} {:<7} Summary",
+                    "Skill", "Risk", "Needs session", "Network", "Dry-run"
+                );
+                for row in rows {
                     println!(
-                        "{}\t{:?}\tsession={}\tnetwork={}\tdry_run={}",
-                        spec.name,
-                        spec.risk,
-                        spec.requires_session,
-                        spec.requires_network,
-                        spec.dry_run
+                        "{:<18} {:<8} {:<13} {:<7} {:<7} {}",
+                        row.name,
+                        row.risk,
+                        yes_no(row.needs_session),
+                        yes_no(row.network),
+                        yes_no(row.dry_run),
+                        row.summary
                     );
                 }
                 Ok(())
             }
         }
-        ToolsCommands::Inspect {
-            tool_name,
+        SkillCommands::Inspect {
+            name,
             json: local_json,
         } => {
-            let spec = crate::cocli::tools::ToolRegistry::inspect(&tool_name)
-                .map_err(|e| ColabError::config(e.to_string()))?;
-            print_value(json || local_json, &spec)
+            let row = skill_rows(None, None, false)
+                .into_iter()
+                .find(|row| row.name == name)
+                .ok_or_else(|| ColabError::config(format!("unknown skill: {name}")))?;
+            if json || local_json {
+                print_value(true, &row)
+            } else {
+                println!("skill\t{}", row.name);
+                println!("category\t{}", row.category);
+                println!("risk\t{}", row.risk);
+                println!("needs_session\t{}", row.needs_session);
+                println!("network\t{}", row.network);
+                println!("dry_run\t{}", row.dry_run);
+                println!("summary\t{}", row.summary);
+                println!(
+                    "example\tcolab-cli settings skills run {} --json '{{}}'",
+                    row.name
+                );
+                Ok(())
+            }
         }
-        ToolsCommands::Run {
-            tool_name,
+        SkillCommands::Run {
+            name,
             input_json,
             yes,
         } => {
             let input: serde_json::Value = serde_json::from_str(&input_json)?;
-            let output = crate::cocli::tools::ToolRegistry::run_plan(&tool_name, input, yes)
+            let output = crate::cocli::tools::ToolRegistry::run_plan(&name, input, yes)
                 .map_err(|e| ColabError::config(e.to_string()))?;
             print_value(true, &output)
+        }
+        SkillCommands::Enable { name } | SkillCommands::Disable { name } => {
+            Err(ColabError::config(format!(
+                "skill toggles are not implemented; built-in skill `{name}` is always available"
+            )))
         }
     }
 }
 
-fn handle_fleet(cmd: FleetCommands, _ui: Ui, json: bool) -> Result<()> {
+#[derive(serde::Serialize)]
+struct SkillRow {
+    name: String,
+    category: String,
+    risk: &'static str,
+    needs_session: bool,
+    network: bool,
+    dry_run: bool,
+    summary: String,
+}
+
+fn skill_rows(category: Option<&str>, risk: Option<&str>, needs_session: bool) -> Vec<SkillRow> {
+    crate::cocli::tools::ToolRegistry::specs()
+        .into_iter()
+        .map(|spec| {
+            let category = spec.name.split('.').next().unwrap_or("misc").to_string();
+            SkillRow {
+                name: spec.name,
+                category,
+                risk: display_risk(spec.risk),
+                needs_session: spec.requires_session,
+                network: spec.requires_network,
+                dry_run: spec.dry_run,
+                summary: sentence_case(&spec.description),
+            }
+        })
+        .filter(|row| category.is_none_or(|want| row.category == want))
+        .filter(|row| risk.is_none_or(|want| row.risk == want))
+        .filter(|row| !needs_session || row.needs_session)
+        .collect()
+}
+
+fn display_risk(risk: crate::cocli::r#continue::manifest::RiskLevel) -> &'static str {
+    match risk {
+        crate::cocli::r#continue::manifest::RiskLevel::Low => "low",
+        crate::cocli::r#continue::manifest::RiskLevel::Network => "medium",
+        crate::cocli::r#continue::manifest::RiskLevel::Destructive => "high",
+    }
+}
+
+fn sentence_case(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+fn handle_fleet(cmd: FleetCommands, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         FleetCommands::Plan(args) => {
             let (cfg, plan, findings) = fleet_plan_from_args(&args)?;
@@ -600,6 +1073,7 @@ fn handle_fleet(cmd: FleetCommands, _ui: Ui, json: bool) -> Result<()> {
             ))
         }
         FleetCommands::Doctor => {
+            migration(&ui, "colab-cli status fleet");
             let data = serde_json::json!({
                 "fleet_mode": "compliant",
                 "free_tier_cluster_backend": false,
@@ -658,6 +1132,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
             }
         }
         SlurpCommands::Doctor(args) => {
+            migration(&ui, "colab-cli status slurp");
             let cfg = load_slurp(&args.config)?;
             let mut findings = crate::cocli::fleet::compliance::validate_slurp(&cfg);
             if !Path::new(&cfg.work.entry).exists() {
@@ -712,7 +1187,7 @@ fn handle_agent(cmd: AgentCommands, ui: Ui, json: bool) -> Result<()> {
         AgentCommands::Tools => handle_tools(ToolsCommands::List { json }, ui, json),
         AgentCommands::Plan { goal, out } => {
             let plan = format!(
-                "goal = {goal:?}\nconfirm_required = true\n\n[[steps]]\ntool = \"doctor\"\ninput = {{}}\n"
+                "goal = {goal:?}\nconfirm_required = true\n\n[[steps]]\ntool = \"status.check\"\ninput = {{}}\n"
             );
             if let Some(out) = out {
                 std::fs::write(&out, plan)?;
@@ -978,69 +1453,6 @@ fn handle_config(cmd: ConfigCommands, json: bool) -> Result<()> {
     }
 }
 
-fn handle_doctor(cmd: Option<DoctorCommands>, vibe: bool, ui: Ui, json: bool) -> Result<()> {
-    let auth_state = auth::current_account()?.map(|a| a.email);
-    let ferret = matches!(cmd.as_ref(), Some(DoctorCommands::Ferret));
-    let data = match cmd {
-        None => serde_json::json!({
-            "auth": auth_state,
-            "config_path": config::config_path().ok().map(|p| p.display().to_string()),
-            "unsafe_code": "forbidden by package lints",
-            "next_action": "run `colab-cli doctor quick` for the short path"
-        }),
-        Some(DoctorCommands::Quick) => serde_json::json!({
-            "auth": auth_state.is_some(),
-            "config": config::config_path().ok().map(|p| p.exists()).unwrap_or(false),
-            "data_dir": config::data_dir().ok().map(|p| p.display().to_string()),
-            "next_action": if auth_state.is_some() { "run `colab-cli session list`" } else { "run `colab-cli auth login`" }
-        }),
-        Some(DoctorCommands::Auth) => serde_json::json!({ "auth": auth_state }),
-        Some(DoctorCommands::Mounts) => serde_json::json!({
-            "note": "mount checks require a live session; use `colab-cli mount list --session NAME`"
-        }),
-        Some(DoctorCommands::Env) => serde_json::json!({
-            "note": "environment checks require a live session",
-            "next_action": "run `colab-cli exec py --session NAME --code \"import sys; print(sys.version)\"`"
-        }),
-        Some(DoctorCommands::Paths) => serde_json::json!({
-            "config_dir": config::config_dir().ok().map(|p| p.display().to_string()),
-            "data_dir": config::data_dir().ok().map(|p| p.display().to_string()),
-            "config_path": config::config_path().ok().map(|p| p.display().to_string())
-        }),
-        Some(DoctorCommands::Perf) => serde_json::json!({
-            "budgets": {
-                "help_ms": 80,
-                "config_load_ms": 5,
-                "manifest_diff_files": 10000
-            },
-            "bench": "cargo bench"
-        }),
-        Some(DoctorCommands::Compliance) => serde_json::json!({
-            "fleet_free_tier_bypass": false,
-            "account_rotation": false,
-            "message": "Use paid, enterprise, marketplace, or local runtimes for fleet jobs"
-        }),
-        Some(DoctorCommands::Ferret) => serde_json::json!({
-            "ferret": "suspiciously operational"
-        }),
-    };
-    if json {
-        print_value(true, &data)
-    } else if ferret {
-        println!("ferret status: suspiciously operational");
-        Ok(())
-    } else {
-        if vibe && !ui.quiet && std::env::var_os("CI").is_none() {
-            println!("cocli ▸ fast path found");
-            println!(" /\\_/\\\\");
-            println!("( o.o )");
-        }
-        ui.success("doctor checks complete");
-        println!("{}", serde_json::to_string_pretty(&data)?);
-        Ok(())
-    }
-}
-
 fn handle_bug_report(show_private: bool, _json: bool) -> Result<()> {
     let auth = auth::current_account()?;
     let account = auth.map(|a| {
@@ -1276,9 +1688,32 @@ async fn compat_transfer(
     }
 }
 
-fn migration(ui: &Ui, old: &str, new: &str) {
-    ui.info(&format!("old: {old}"));
-    ui.info(&format!("new: {new}"));
+fn migration(ui: &Ui, new: &str) {
+    if !ui.quiet {
+        println!("moved: use `{new}`");
+    }
+}
+
+fn runtime_migration_target(cmd: &RuntimeCommands) -> &'static str {
+    match cmd {
+        RuntimeCommands::Info { backend: true } | RuntimeCommands::BackendInfo => {
+            "colab-cli status runtime --backend"
+        }
+        RuntimeCommands::Info { backend: false } => "colab-cli status runtime",
+        RuntimeCommands::Gpu => "colab-cli status runtime --gpu",
+        RuntimeCommands::Tpu => "colab-cli status runtime --tpu",
+        RuntimeCommands::Versions => "colab-cli status runtime --versions",
+        RuntimeCommands::Fit { .. } => "colab-cli status runtime --fit MODEL",
+    }
+}
+
+fn config_migration_target(cmd: &ConfigCommands) -> &'static str {
+    match cmd {
+        ConfigCommands::Get => "colab-cli settings get",
+        ConfigCommands::Set { .. } => "colab-cli settings set KEY VALUE",
+        ConfigCommands::Path => "colab-cli settings path",
+        ConfigCommands::Open => "colab-cli settings edit",
+    }
 }
 
 fn print_value<T: serde::Serialize>(json: bool, value: &T) -> Result<()> {

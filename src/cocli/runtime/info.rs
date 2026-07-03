@@ -108,17 +108,17 @@ pub fn migration_hint(old_command: &[&str]) -> Option<MigrationHint> {
     let new = match first {
         "new" => "colab-cli session new",
         "sessions" => "colab-cli session list",
-        "status" => "colab-cli session status",
+        "status" => "colab-cli status session",
         "stop" => "colab-cli session stop",
         "url" => "colab-cli session url",
-        "exec" => "colab-cli exec py",
-        "run" => "colab-cli exec run",
+        "exec" => "colab-cli run py",
+        "run" => "colab-cli run script",
         "upload" => "colab-cli fs push",
         "download" => "colab-cli fs pull",
         "ls" => "colab-cli fs ls",
         "rm" => "colab-cli fs rm",
-        "drivemount" => "colab-cli mount drive",
-        "install" => "colab-cli env install",
+        "drivemount" => "colab-cli fs drive mount",
+        "install" => "colab-cli run install",
         _ => return None,
     };
     Some(MigrationHint {
@@ -143,7 +143,7 @@ mod tests {
     fn migration_hints_cover_old_exec() {
         let hint = migration_hint(&["exec", "-f", "train.py"]).unwrap();
         assert_eq!(hint.old, "colab exec -f train.py");
-        assert_eq!(hint.new, "colab-cli exec py");
+        assert_eq!(hint.new, "colab-cli run py");
     }
 
     #[test]

@@ -32,92 +32,117 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Session lifecycle
+    /// create, list, stop, and open Colab sessions
     Session {
         #[command(subcommand)]
         command: SessionCommands,
     },
-    /// Execute code on a runtime
-    Exec {
+    /// run code and prepare the runtime
+    Run {
         #[command(subcommand)]
-        command: ExecCommands,
+        command: RunCommands,
     },
-    /// Remote/local file operations
+    /// move files and manage Drive
     Fs {
         #[command(subcommand)]
         command: FsCommands,
     },
-    /// Google Drive and runtime mounts
-    Mount {
+    /// show runtime, auth, session, and health state
+    Status {
         #[command(subcommand)]
-        command: MountCommands,
+        command: Option<StatusCommands>,
     },
-    /// Runtime Python environment
-    Env {
-        #[command(subcommand)]
-        command: EnvCommands,
-    },
-    /// Runtime metadata
-    Runtime {
-        #[command(subcommand)]
-        command: RuntimeCommands,
-    },
-    /// Tool registry
-    Tools {
-        #[command(subcommand)]
-        command: ToolsCommands,
-    },
-    /// Compliant runtime fleet planning
-    Fleet {
-        #[command(subcommand)]
-        command: FleetCommands,
-    },
-    /// Slurp TOML orchestration
-    Slurp {
-        #[command(subcommand)]
-        command: SlurpCommands,
-    },
-    /// Release helpers
-    Release {
-        #[command(subcommand)]
-        command: ReleaseCommands,
-    },
-    /// Agent-friendly planning surfaces
-    Agent {
-        #[command(subcommand)]
-        command: AgentCommands,
-    },
-    /// Checkpoint and replay continuation
+    /// save and resume checkpoint plans
     #[command(name = "continue")]
     Continue {
         #[command(subcommand)]
         command: ContinueCommands,
     },
-    /// Local configuration
+    /// run tiny TOML workflows
+    Slurp {
+        #[command(subcommand)]
+        command: SlurpCommands,
+    },
+    /// plan approved multi-runtime work
+    Fleet {
+        #[command(subcommand)]
+        command: FleetCommands,
+    },
+    /// edit config and inspect skills
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCommands,
+    },
+    /// release metadata and maintainer helpers
+    Release {
+        #[command(subcommand)]
+        command: ReleaseCommands,
+    },
+    /// Authentication
+    #[command(hide = true)]
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommands,
+    },
+    /// Generate shell completions
+    #[command(hide = true)]
+    Completions { shell: clap_complete::Shell },
+
+    /// Write a redacted diagnostic bundle
+    #[command(name = "bug-report", hide = true)]
+    BugReport {
+        #[arg(long)]
+        show_private: bool,
+    },
+    /// Compatibility: `exec` moved to `run`.
+    #[command(hide = true)]
+    Exec {
+        #[command(subcommand)]
+        command: ExecCommands,
+    },
+    /// Compatibility: `env` moved to `run`.
+    #[command(hide = true)]
+    Env {
+        #[command(subcommand)]
+        command: EnvCommands,
+    },
+    /// Compatibility: `mount` moved under `fs drive`.
+    #[command(hide = true)]
+    Mount {
+        #[command(subcommand)]
+        command: MountCommands,
+    },
+    /// Compatibility: `runtime` moved to `status runtime`.
+    #[command(hide = true)]
+    Runtime {
+        #[command(subcommand)]
+        command: RuntimeCommands,
+    },
+    /// Compatibility: `tools` moved to `settings skills`.
+    #[command(hide = true)]
+    Tools {
+        #[command(subcommand)]
+        command: ToolsCommands,
+    },
+    /// Compatibility: `config` moved to `settings`.
+    #[command(hide = true)]
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
     },
-    /// Diagnostics
+    /// Compatibility: `doctor` moved to `status check`.
+    #[command(hide = true)]
     Doctor {
         #[arg(long)]
         vibe: bool,
         #[command(subcommand)]
         command: Option<DoctorCommands>,
     },
-    /// Authentication
-    Auth {
+    /// Compatibility: old agent surfaces.
+    #[command(hide = true)]
+    Agent {
         #[command(subcommand)]
-        command: AuthCommands,
-    },
-    /// Generate shell completions
-    Completions { shell: clap_complete::Shell },
-
-    /// Write a redacted diagnostic bundle
-    #[command(name = "bug-report")]
-    BugReport {
-        #[arg(long)]
-        show_private: bool,
+        command: AgentCommands,
     },
 
     /// Compatibility: old Rust `server` group.
@@ -138,9 +163,6 @@ pub enum Commands {
     /// Compatibility: `colab sessions`.
     #[command(name = "sessions", hide = true)]
     CompatSessions,
-    /// Compatibility: `colab status`.
-    #[command(name = "status", hide = true)]
-    CompatStatus(SessionNameArg),
     /// Compatibility: `colab stop`.
     #[command(name = "stop", hide = true)]
     CompatStop(SessionNameArg),
@@ -237,7 +259,8 @@ pub enum SessionCommands {
     /// List assigned sessions
     #[command(alias = "ls")]
     List,
-    /// Show session status
+    /// Compatibility: moved to `status session`.
+    #[command(hide = true)]
     Status(SessionNameArg),
     /// Stop a session
     Stop(SessionNameArg),
@@ -250,6 +273,71 @@ pub enum SessionCommands {
     },
     /// Show the last assigned session
     Last,
+}
+
+#[derive(Subcommand)]
+pub enum RunCommands {
+    /// Run a Python script path on the runtime
+    #[command(alias = "run")]
+    Script {
+        script: String,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Run Python code
+    Py {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(long)]
+        code: String,
+    },
+    /// Execute a notebook with nbconvert on the runtime
+    #[command(alias = "nb")]
+    Notebook {
+        notebook: String,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Start a Python REPL
+    Repl {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    /// Start a remote shell
+    Shell {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    /// Install packages or a requirements file
+    Install {
+        packages: Vec<String>,
+        #[arg(short = 'r', long = "requirements")]
+        requirements: Option<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    /// Freeze installed packages
+    Freeze {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    /// Restore packages from requirements.txt
+    Restore {
+        requirements: String,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    /// Rerun the last local command after confirmation
+    Last {
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Show recent local run commands
+    History,
 }
 
 #[derive(Subcommand)]
@@ -338,6 +426,43 @@ pub enum FsCommands {
     Diff(FsDiffArgs),
     /// Show local changes that sync would upload
     Changed(FsDiffArgs),
+    /// Manage Google Drive inside the runtime filesystem
+    Drive {
+        #[command(subcommand)]
+        command: FsDriveCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FsDriveCommands {
+    /// Mount Google Drive
+    Mount {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(long, default_value = "/content/drive")]
+        path: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show Drive mount state
+    Status {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Unmount Google Drive
+    Unmount {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Print the expected Drive path
+    Path {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
 }
 
 #[derive(clap::Args)]
@@ -427,6 +552,54 @@ pub enum RuntimeCommands {
 }
 
 #[derive(Subcommand)]
+pub enum StatusCommands {
+    /// Show session state
+    Session {
+        #[arg(long, alias = "name")]
+        name: Option<String>,
+    },
+    /// Show runtime metadata
+    Runtime {
+        #[arg(long)]
+        backend: bool,
+        #[arg(long)]
+        gpu: bool,
+        #[arg(long)]
+        tpu: bool,
+        #[arg(long)]
+        versions: bool,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        fit: Option<String>,
+    },
+    /// Show auth state
+    Auth,
+    /// Show file sync state
+    Fs,
+    /// Show Drive state
+    Drive,
+    /// Show Slurp config state
+    Slurp {
+        #[arg(long, default_value = "slurp.toml")]
+        config: String,
+    },
+    /// Show fleet planning state
+    Fleet {
+        #[arg(long, default_value = "slurp.toml")]
+        config: String,
+    },
+    /// Fast local health check
+    Quick,
+    /// Run local health checks
+    Check,
+    /// Show runtime setup hints
+    Run,
+    /// Show config/cache paths
+    Paths,
+}
+
+#[derive(Subcommand)]
 pub enum ToolsCommands {
     List {
         #[arg(long)]
@@ -443,6 +616,58 @@ pub enum ToolsCommands {
         tool_name: String,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SettingsCommands {
+    Get,
+    Set {
+        key: String,
+        value: String,
+    },
+    #[command(alias = "locate")]
+    Path,
+    Edit,
+    Reset {
+        #[arg(long)]
+        yes: bool,
+    },
+    Skills {
+        #[command(subcommand)]
+        command: SkillCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SkillCommands {
+    List {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        risk: Option<String>,
+        #[arg(long)]
+        needs_session: bool,
+    },
+    Inspect {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Run {
+        name: String,
+        #[arg(long = "json", default_value = "{}")]
+        input_json: String,
+        #[arg(long)]
+        yes: bool,
+    },
+    Enable {
+        name: String,
+    },
+    Disable {
+        name: String,
     },
 }
 
@@ -480,6 +705,7 @@ pub enum FleetCommands {
     Plan(FleetConfigArgs),
     Start(FleetConfigArgs),
     Exec(FleetConfigArgs),
+    #[command(hide = true)]
     Doctor,
 }
 
@@ -506,7 +732,9 @@ pub enum SlurpCommands {
     Run(FleetConfigArgs),
     Resume(FleetConfigArgs),
     Explain(FleetConfigArgs),
+    #[command(hide = true)]
     Doctor(FleetConfigArgs),
+    #[command(hide = true)]
     Schema,
 }
 
@@ -768,11 +996,11 @@ mod tests {
     }
 
     #[test]
-    fn exec_run_parses_forwarded_args() {
+    fn run_script_parses_forwarded_args() {
         let cli = Cli::try_parse_from([
             "colab-cli",
-            "exec",
             "run",
+            "script",
             "train.py",
             "--session",
             "trainer",
@@ -781,16 +1009,16 @@ mod tests {
             "3",
         ])
         .unwrap();
-        let Commands::Exec {
+        let Commands::Run {
             command:
-                ExecCommands::Run {
+                RunCommands::Script {
                     script,
                     session,
                     args,
                 },
         } = cli.command
         else {
-            panic!("expected exec run");
+            panic!("expected run script");
         };
         assert_eq!(script, "train.py");
         assert_eq!(session.as_deref(), Some("trainer"));
@@ -805,11 +1033,17 @@ mod tests {
 
     #[test]
     fn new_followup_spaces_parse() {
-        assert!(Cli::try_parse_from(["colab-cli", "auth", "add", "--name", "personal"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "run", "install", "torch"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "status", "runtime", "--gpu"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "fs", "drive", "mount"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["colab-cli", "settings", "skills", "inspect", "session.new"])
+                .is_ok()
+        );
         assert!(
             Cli::try_parse_from(["colab-cli", "fleet", "plan", "--config", "slurp.toml"]).is_ok()
         );
-        assert!(Cli::try_parse_from(["colab-cli", "slurp", "schema"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "slurp", "explain"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "release", "name", "v0.4.2"]).is_ok());
     }
 

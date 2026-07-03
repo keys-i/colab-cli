@@ -6,20 +6,19 @@ Rust CLI for Google Colab sessions, execution, file transfer, continuation bundl
 
 ```sh
 colab-cli session new --name train --gpu T4
-colab-cli env install --session train torch transformers
-colab-cli exec run train.py --session train -- --epochs 3
+colab-cli run install --session train torch transformers
+colab-cli run script train.py --session train -- --epochs 3
 colab-cli continue save --session train --name train-run
 colab-cli continue resume train-run --dry-run
 colab-cli fs pull /content/checkpoints ./checkpoints
 colab-cli session stop --name train
 ```
 
-Agent-friendly plan surface:
+Built-in skills are visible through settings:
 
 ```sh
-colab-cli agent tools
-colab-cli agent plan "run notebook.ipynb on an L4 and pull ./outputs"
-colab-cli agent run plan.toml --confirm
+colab-cli settings skills list
+colab-cli settings skills inspect run.notebook
 ```
 
 Continuation bundle:
@@ -38,15 +37,15 @@ Continuation restores files, metadata, mounts, environment plans, and pending co
 ```text
 colab-cli session new --name trainer --gpu A100
 colab-cli session list
-colab-cli session status --session trainer
+colab-cli status session --name trainer
 colab-cli session stop --session trainer
 colab-cli session url --session trainer --open
 
-colab-cli exec run train.py --session trainer -- arg1 arg2
-colab-cli exec py --session trainer --code "print(1)"
-colab-cli exec nb notebook.ipynb --session trainer --out executed.ipynb
-colab-cli exec repl --session trainer
-colab-cli exec shell --session trainer
+colab-cli run script train.py --session trainer -- arg1 arg2
+colab-cli run py --session trainer --code "print(1)"
+colab-cli run notebook notebook.ipynb --session trainer --out executed.ipynb
+colab-cli run repl --session trainer
+colab-cli run shell --session trainer
 
 colab-cli fs ls /content
 colab-cli fs push ./data.csv /content/data.csv
@@ -55,12 +54,12 @@ colab-cli fs rm /content/tmp --recursive --yes
 colab-cli fs sync ./src /content/src --dry-run
 colab-cli fs changed ./src /content/src
 
-colab-cli mount drive --session trainer --path /content/drive
-colab-cli env install torch transformers --session trainer
-colab-cli runtime info --backend
-colab-cli runtime fit --model llama-7b
-colab-cli tools list
-colab-cli doctor quick
+colab-cli fs drive mount --session trainer --path /content/drive
+colab-cli run install torch transformers --session trainer
+colab-cli status runtime --backend
+colab-cli status runtime --fit llama-7b
+colab-cli settings skills list
+colab-cli status quick
 ```
 
 Compatibility groups `server` and `file` still parse. Hidden aliases cover cheap old `colab new`, `colab sessions`, `colab upload`, and `colab download` forms with migration hints.
@@ -83,7 +82,6 @@ src/
     continue/
     tools/
     config/
-    doctor/
     release/
     ui/
     util/
@@ -126,6 +124,7 @@ Research notes live in [docs/research.md](docs/research.md). The current build p
 - [Plan](plan.md)
 - [Refactor map](docs/refactor-map.md)
 - [Prune report](docs/prune-report.md)
+- [Command audit](docs/command-audit.md)
 - [Easter eggs](docs/easter-eggs.md)
 - [Continuation](docs/continuation.md)
 - [Tools](docs/tools.md)
