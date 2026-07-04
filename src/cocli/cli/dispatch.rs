@@ -21,6 +21,7 @@ use crate::cocli::cli::{
 #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 use crate::cocli::cli::{DevCommands, ReleaseCommands};
 use crate::cocli::config::{self, ColabConfig};
+use crate::cocli::debug::{self, Verbosity};
 use crate::cocli::error::{ColabError, Result};
 use crate::cocli::exec::runner;
 use crate::cocli::session::ServerManager;
@@ -44,10 +45,12 @@ pub async fn main_entry() {
         cli.json,
     );
     colored::control::set_override(use_color);
+    let verbosity = Verbosity::from_count(cli.verbose, cli.quiet);
+    debug::set(verbosity);
     let ring_bell = config::terminal_bell_allowed(cli.bell, ci, cli.quiet || cli.json);
     let json_mode = cli.json;
-    let verbose = cli.verbose;
-    let interactive = interaction_allowed(&cli, stdout_tty, stdin_tty, ci);
+    let verbose = debug::enabled(3);
+    let interactive = interaction_allowed(&cli, stdout_tty, stdin_tty, ci) && !debug::enabled(1);
     let plain = cli.plain
         || ((ci || !stdout_tty) && color_choice != config::ColorChoice::Always)
         || !use_color;
@@ -55,7 +58,7 @@ pub async fn main_entry() {
 
     if let Err(e) = run(cli, ui).await {
         if json_mode {
-            print_error_json(&e, verbose);
+            print_error_json(&e);
         } else {
             print_human_error(&e, verbose, ui);
         }
@@ -79,10 +82,14 @@ pub async fn main_entry() {
     }
 }
 
-fn print_error_json(e: &ColabError, verbose: bool) {
+fn print_error_json(e: &ColabError) {
     let error = match e {
-        ColabError::ApiError { status, url, body } => {
-            let mut value = serde_json::json!({
+        ColabError::ApiError {
+            status,
+            url,
+            body: _,
+        } => {
+            serde_json::json!({
                 "kind": error_kind(e),
                 "status": status,
                 "reason": http_reason(*status),
@@ -90,28 +97,17 @@ fn print_error_json(e: &ColabError, verbose: bool) {
                 "retryable": retryable_status(*status),
                 "message": api_message(*status, url),
                 "fix": api_fix(*status, url),
-            });
-            if verbose {
-                value["url"] = serde_json::Value::String(url.clone());
-                if let Some(body) = body {
-                    value["raw"] = serde_json::Value::String(trim_raw(body));
-                }
-            }
-            value
+            })
         }
         ColabError::Drive(drive) => {
-            let mut value = serde_json::json!({
+            serde_json::json!({
                 "kind": drive.kind,
                 "message": drive.message,
                 "next_action": drive.next_action,
                 "stage": drive.stage,
                 "retryable": drive.retryable,
                 "fix": drive.fixes,
-            });
-            if verbose && let Some(raw) = &drive.raw {
-                value["raw"] = serde_json::Value::String(raw.clone());
-            }
-            value
+            })
         }
         ColabError::Config(message) => serde_json::json!({
             "kind": error_kind(e),
@@ -152,13 +148,17 @@ fn print_human_error(e: &ColabError, verbose: bool, ui: Ui) {
             }
             if verbose {
                 eprintln!();
-                eprintln!("url: {url}");
+                eprintln!("url: {}", debug::sanitize_url(url));
                 if let Some(body) = body {
-                    eprintln!("body: {}", trim_raw(body));
+                    eprintln!("body: {}", trim_raw(&debug::redact(body)));
                 }
             } else if body.is_some() {
                 eprintln!();
-                eprintln!("Use --verbose to see the server body");
+                if debug::enabled(1) {
+                    eprintln!("Use -vvv to see the sanitized server body");
+                } else {
+                    eprintln!("Use --verbose to see the server body");
+                }
             }
         }
         ColabError::Drive(drive) => {
@@ -180,14 +180,53 @@ fn print_human_error(e: &ColabError, verbose: bool, ui: Ui) {
                 eprintln!("fix: {next}");
             }
             if verbose && let Some(raw) = &drive.raw {
-                eprintln!("\n{}", trim_raw(raw));
+                eprintln!("\n{}", trim_raw(&debug::redact(raw)));
             } else if drive.raw.is_some() {
                 eprintln!();
-                eprintln!("Use --verbose to see the request details");
+                if debug::enabled(1) {
+                    eprintln!("Use -vvv to see sanitized request details");
+                } else {
+                    eprintln!("Use --verbose to see the request details");
+                }
             }
         }
         ColabError::Config(message) => eprintln!("{message}"),
+        ColabError::Network(error) => {
+            eprintln!("Network request failed");
+            eprintln!();
+            eprintln!("{}", network_error_message(error));
+            eprintln!(
+                "retryable: {}",
+                yes_no(error.is_timeout() || error.is_connect())
+            );
+            if verbose {
+                eprintln!();
+                if let Some(url) = error.url() {
+                    eprintln!("url: {}", debug::sanitize_url(url.as_str()));
+                }
+                eprintln!("source: {}", debug::redact(&error.to_string()));
+            } else {
+                eprintln!();
+                if debug::enabled(1) {
+                    eprintln!("Use -vvv for sanitized request details");
+                } else {
+                    eprintln!("Use -v for request stages or -vvv for sanitized request details");
+                }
+            }
+        }
         _ => ui.error(&e.to_string()),
+    }
+}
+
+fn network_error_message(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "The request timed out"
+    } else if error.is_connect() {
+        "The endpoint is not reachable"
+    } else if error.is_status() {
+        "The server returned an error status"
+    } else {
+        "The request could not be completed"
     }
 }
 
@@ -272,7 +311,10 @@ fn api_fix(status: u16, url: &str) -> Option<&'static str> {
 }
 
 fn trim_raw(body: &str) -> String {
-    let clean = strip_html(body).replace('\n', " ");
+    let body = body.replace("<redacted>", "__COCLI_REDACTED__");
+    let clean = strip_html(&body)
+        .replace("__COCLI_REDACTED__", "<redacted>")
+        .replace('\n', " ");
     let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
     if clean.len() > 600 {
         format!("{}...", &clean[..600])
@@ -328,6 +370,122 @@ fn handle_launcher(ui: Ui) -> Result<()> {
     Ok(())
 }
 
+fn load_colab_config(quiet: bool) -> Result<ColabConfig> {
+    let config_path = config::config_path()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<unknown>".to_string());
+    let config = ColabConfig::load(quiet)?;
+    debug::debug1(format!("config loaded path={config_path}"));
+    debug::debug2(format!(
+        "config data_dir={} session_store={}",
+        config.data_dir.display(),
+        config.servers_file().display()
+    ));
+    Ok(config)
+}
+
+fn command_namespace(command: &Option<Commands>) -> &'static str {
+    match command {
+        None => "help",
+        Some(Commands::Session { command }) => match command {
+            Some(SessionCommands::New(_)) => "session.new",
+            Some(SessionCommands::List) => "session.list",
+            Some(SessionCommands::Refresh) => "session.refresh",
+            Some(SessionCommands::Repair(_)) => "session.repair",
+            Some(SessionCommands::Reconnect(_)) => "session.reconnect",
+            Some(SessionCommands::Url { .. }) => "session.url",
+            Some(SessionCommands::Stop(_)) => "session.stop",
+            Some(SessionCommands::Logs(_)) => "session.logs",
+            Some(SessionCommands::Kernel { .. }) => "session.kernel",
+            Some(SessionCommands::Last) => "session.last",
+            _ => "session",
+        },
+        Some(Commands::Run { command }) => match command {
+            RunCommands::Py { .. } => "run.py",
+            RunCommands::Script { .. } => "run.script",
+            RunCommands::Notebook { .. } => "run.notebook",
+            RunCommands::Shell { .. } => "run.shell",
+            RunCommands::Repl { .. } => "run.repl",
+            RunCommands::Pip { command } => match command {
+                PipCommands::Install { .. } => "run.pip.install",
+                PipCommands::Freeze { .. } => "run.pip.freeze",
+                PipCommands::Restore { .. } => "run.pip.restore",
+                PipCommands::Check { .. } => "run.pip.check",
+                PipCommands::List { .. } => "run.pip.list",
+                PipCommands::Tree { .. } => "run.pip.tree",
+                PipCommands::Cache { .. } => "run.pip.cache",
+            },
+            RunCommands::Ast { .. } => "run.ast",
+            RunCommands::Watch { .. } => "run.watch",
+            _ => "run",
+        },
+        Some(Commands::Fs { command }) => match command {
+            FsCommands::Ls { .. } => "fs.ls",
+            FsCommands::Push { .. } => "fs.push",
+            FsCommands::Pull { .. } => "fs.pull",
+            FsCommands::Rm { .. } => "fs.rm",
+            FsCommands::Sync(_) => "fs.sync",
+            FsCommands::Changed(_) => "fs.changed",
+            FsCommands::Diff(_) => "fs.diff",
+            FsCommands::Drive { command } => match command {
+                FsDriveCommands::Mount { .. } => "fs.drive.mount",
+                FsDriveCommands::Status { .. } => "fs.drive.status",
+                FsDriveCommands::List { .. } => "fs.drive.list",
+                FsDriveCommands::Unmount { .. } => "fs.drive.unmount",
+                FsDriveCommands::Path { .. } => "fs.drive.path",
+            },
+            _ => "fs",
+        },
+        Some(Commands::Status { command }) => match command {
+            Some(StatusCommands::Runtime { .. }) => "status.runtime",
+            Some(StatusCommands::Auth) => "status.auth",
+            Some(StatusCommands::Drive) => "status.drive",
+            Some(StatusCommands::Fs) => "status.fs",
+            Some(StatusCommands::Check) => "status.check",
+            Some(StatusCommands::Version) => "status.version",
+            _ => "status",
+        },
+        Some(Commands::Ai { command }) => match command {
+            Some(AiCommands::Tools { .. }) => "ai.tools",
+            Some(AiCommands::Mcp { .. }) => "ai.mcp",
+            Some(AiCommands::Plan { .. }) => "ai.plan",
+            Some(AiCommands::Audit { .. }) => "ai.audit",
+            Some(AiCommands::Explain { .. }) => "ai.explain",
+            Some(AiCommands::Run { .. }) => "ai.run",
+            Some(AiCommands::Code { .. }) => "ai.code",
+            _ => "ai",
+        },
+        Some(Commands::Auth { command }) => match command {
+            AuthCommands::Login { method } if method == "adc" => "auth.login.adc",
+            AuthCommands::Login { .. } => "auth.login.oauth2",
+            AuthCommands::List { .. } => "auth.list",
+            AuthCommands::Status { .. } => "auth.status",
+            AuthCommands::Use { .. } => "auth.use",
+            AuthCommands::Logout { .. } => "auth.logout",
+            AuthCommands::ExportRedacted { .. } => "auth.export-redacted",
+            _ => "auth",
+        },
+        Some(Commands::Settings { command }) => match command {
+            Some(SettingsCommands::Get { .. }) => "settings.get",
+            Some(SettingsCommands::Set { .. }) => "settings.set",
+            Some(SettingsCommands::Path) => "settings.path",
+            Some(SettingsCommands::Edit) => "settings.edit",
+            Some(SettingsCommands::Reset { .. }) => "settings.reset",
+            Some(SettingsCommands::Ui { .. }) => "settings.ui",
+            Some(SettingsCommands::Experiments { .. }) => "settings.experiments",
+            Some(SettingsCommands::Support { .. }) => "settings.support",
+            Some(SettingsCommands::Update { .. }) => "settings.update",
+            Some(SettingsCommands::Billing { .. }) => "settings.billing",
+            _ => "settings",
+        },
+        Some(Commands::Continue { .. }) => "continue",
+        Some(Commands::Distribute { .. }) => "distribute",
+        Some(Commands::Completions { .. }) => "completions",
+        _ => "compat",
+    }
+}
+
 async fn run(cli: Cli, ui: Ui) -> Result<()> {
     if let Some(Commands::Completions { shell }) = &cli.command {
         let mut cmd = Cli::command();
@@ -336,43 +494,44 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
     }
 
     let json = cli.json;
+    debug::debug1(format!("command {}", command_namespace(&cli.command)));
     match cli.command {
         None => handle_launcher(ui),
         Some(Commands::Auth { command }) => handle_auth(command, ui, json).await,
         Some(Commands::Session { command }) => {
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_session(command, &config, ui).await
         }
         Some(Commands::Run { command }) => {
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_run_space(command, &config, ui).await
         }
         Some(Commands::Exec { command }) => {
             migration(&ui, "colab-cli run ...");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_exec(command, &config, ui).await
         }
         Some(Commands::Fs { command }) => {
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_fs(command, &config, ui, json).await
         }
         Some(Commands::Mount { command }) => {
             migration(&ui, mount_migration_target(&command));
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_mount(command, &config, ui, json).await
         }
         Some(Commands::Env { command }) => {
             migration(&ui, "colab-cli run install/freeze/restore");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_env(command, &config, ui).await
         }
         Some(Commands::Runtime { command }) => {
             migration(&ui, runtime_migration_target(&command));
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_runtime(command, &config, ui, json).await
         }
         Some(Commands::Status { command }) => {
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_status(command, &config, ui, json).await
         }
         Some(Commands::Tools { command }) => {
@@ -396,7 +555,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         }
         Some(Commands::Continue { command }) => {
             require_experiment("continue", |cfg| cfg.experiments.continue_work)?;
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_continue(command, &config, ui, json).await
         }
         Some(Commands::Settings { command }) => handle_settings(command, ui, json),
@@ -406,46 +565,46 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         }
         Some(Commands::Doctor { .. }) => {
             migration(&ui, "colab-cli status check");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_status(Some(StatusCommands::Check), &config, ui, json).await
         }
         Some(Commands::BugReport { show_private }) => handle_bug_report(show_private, json),
         Some(Commands::Server { command }) => {
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_server(command, &config, ui).await
         }
         Some(Commands::File { command }) => {
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_file(command, &config, ui).await
         }
         Some(Commands::CompatNew(args)) => {
             migration(&ui, "colab-cli session new");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_session(Some(SessionCommands::New(args)), &config, ui).await
         }
         Some(Commands::CompatSessions) => {
             migration(&ui, "colab-cli session list");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_session(Some(SessionCommands::List), &config, ui).await
         }
         Some(Commands::CompatStop(arg)) => {
             migration(&ui, "colab-cli session stop");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_session(Some(SessionCommands::Stop(arg)), &config, ui).await
         }
         Some(Commands::CompatUpload(args)) => {
             migration(&ui, "colab-cli fs push LOCAL REMOTE");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             compat_transfer(args, true, &config, ui).await
         }
         Some(Commands::CompatDownload(args)) => {
             migration(&ui, "colab-cli fs pull REMOTE LOCAL");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             compat_transfer(args, false, &config, ui).await
         }
         Some(Commands::CompatLog(args)) => {
             migration(&ui, "colab-cli session logs");
-            let config = ColabConfig::load(cli.quiet)?;
+            let config = load_colab_config(cli.quiet)?;
             handle_session_logs(&config, ui, args).await
         }
         Some(Commands::Completions { .. }) => unreachable!(),
@@ -456,7 +615,7 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         AuthCommands::Login { method } if method == "adc" => handle_auth_adc_login(ui, json),
         AuthCommands::Login { .. } => {
-            let config = ColabConfig::load(ui.quiet)?;
+            let config = load_colab_config(ui.quiet)?;
             handle_login(&config, ui).await
         }
         AuthCommands::Logout { profile: None } => {
@@ -1439,12 +1598,26 @@ async fn drive_mount(
     drive_stage(&ui, "load_selected_session", "checking session");
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
+    debug::debug1(format!(
+        "session store loaded sessions={} selected={:?}",
+        servers.len(),
+        session.as_deref().unwrap_or("<auto>")
+    ));
     let server = resolve_server(&servers, session.as_deref())?;
     let server = ensure_fresh_token(&manager, server, &ui).await?;
+    debug::debug1(format!(
+        "drive.mount stage=load_session ok name={:?}",
+        server.label
+    ));
     drive_done(&ui, "session loaded", &server.label);
 
     drive_stage(&ui, "validate_endpoint_url", "validating endpoint");
     validate_runtime_endpoint(&server)?;
+    debug::debug1(format!(
+        "drive.mount stage=validate_endpoint ok endpoint={}",
+        server.endpoint
+    ));
+    debug::debug2(format!("session endpoint host={}", server.endpoint));
     drive_done(&ui, "endpoint url valid", &server.endpoint);
 
     let preflight_timeout = std::time::Duration::from_secs(preflight_timeout_secs.max(1));
@@ -1456,7 +1629,8 @@ async fn drive_mount(
         &ui,
         json,
     )
-    .await?;
+    .await
+    .inspect_err(log_drive_failure)?;
     drive_done(&ui, "endpoint reachable", "Jupyter sessions API");
 
     drive_stage(&ui, "find_kernel", "finding kernel");
@@ -1511,7 +1685,7 @@ async fn drive_mount(
 }
 
 fn drive_progress(ui: &Ui, title: &str) {
-    if !ui.quiet {
+    if !ui.quiet && !debug::enabled(1) {
         println!("{title}");
         println!("{}", rule(*ui));
         println!();
@@ -1519,13 +1693,13 @@ fn drive_progress(ui: &Ui, title: &str) {
 }
 
 fn drive_stage(ui: &Ui, _stage: &str, label: &str) {
-    if !ui.quiet {
+    if !ui.quiet && !debug::enabled(1) {
         println!("· {label}");
     }
 }
 
 fn drive_done(ui: &Ui, label: &str, detail: &str) {
-    if !ui.quiet {
+    if !ui.quiet && !debug::enabled(1) {
         println!("✓ {label:<26} {detail}");
     }
 }
@@ -1571,16 +1745,43 @@ async fn drive_jupyter_sessions_with_retry(
     let attempts = retries.saturating_add(1).max(1);
     let mut last = None;
     for attempt in 1..=attempts {
+        debug::debug1(format!(
+            "drive.mount stage=check_jupyter_sessions attempt={attempt}/{attempts}"
+        ));
+        debug::debug2(format!(
+            "http request method=GET path=/api/sessions timeout={}s",
+            timeout.as_secs_f64()
+        ));
+        debug::debug3(format!(
+            "http request url={}",
+            debug::sanitize_url(&format!(
+                "https://colab.research.google.com/tun/m/{}/api/sessions?authuser=0",
+                server.endpoint
+            ))
+        ));
         drive_stage(
             ui,
             "check_jupyter_sessions",
             &format!("checking Jupyter sessions attempt {attempt}/{attempts}"),
         );
+        let started = std::time::Instant::now();
         match tokio::time::timeout(timeout, client.list_sessions_via_tunnel(&server.endpoint)).await
         {
-            Ok(Ok(sessions)) => return Ok(sessions),
+            Ok(Ok(sessions)) => {
+                debug::debug1(format!(
+                    "drive.mount stage=check_jupyter_sessions ok elapsed={:.3}s sessions={}",
+                    started.elapsed().as_secs_f64(),
+                    sessions.len()
+                ));
+                return Ok(sessions);
+            }
             Ok(Err(e)) => {
                 let mapped = map_drive_stage_error("check_jupyter_sessions", server, e);
+                debug::debug1(format!(
+                    "http error elapsed={:.3}s retryable={}",
+                    started.elapsed().as_secs_f64(),
+                    yes_no(drive_error_retryable(&mapped))
+                ));
                 if !drive_error_retryable(&mapped) || attempt == attempts {
                     return Err(mapped);
                 }
@@ -1589,22 +1790,39 @@ async fn drive_jupyter_sessions_with_retry(
             Err(_) => {
                 let mapped =
                     drive_endpoint_error("check_jupyter_sessions", server, "timeout", true, None);
+                debug::debug1(format!(
+                    "http timeout method=GET path=/api/sessions elapsed={:.3}s retryable=yes",
+                    started.elapsed().as_secs_f64()
+                ));
                 if attempt == attempts {
                     return Err(mapped);
                 }
                 last = Some(mapped);
             }
         }
-        if !json && !ui.quiet {
+        let jitter_ms = (u64::from(attempt) * 37) % 100;
+        let backoff = std::time::Duration::from_millis(200 * u64::from(attempt) + jitter_ms);
+        debug::debug1(format!(
+            "retry scheduled attempt={}/{} backoff={}ms",
+            attempt + 1,
+            attempts,
+            backoff.as_millis()
+        ));
+        debug::debug2(format!(
+            "retry backoff={}ms jitter={}ms",
+            backoff.as_millis(),
+            jitter_ms
+        ));
+        if !json && !ui.quiet && !debug::enabled(1) {
             println!("· retrying runtime endpoint");
         }
-        tokio::time::sleep(std::time::Duration::from_millis(200 * u64::from(attempt))).await;
+        tokio::time::sleep(backoff).await;
     }
     Err(last.unwrap_or_else(|| {
         drive_endpoint_error(
             "check_jupyter_sessions",
             server,
-            "unknown network",
+            "unknown_network",
             true,
             None,
         )
@@ -1628,6 +1846,20 @@ fn drive_error_retryable(error: &ColabError) -> bool {
     matches!(error, ColabError::Drive(drive) if drive.retryable)
 }
 
+fn log_drive_failure(error: &ColabError) {
+    if let ColabError::Drive(drive) = error {
+        debug::debug1(format!(
+            "drive.mount failed kind={} stage={} retryable={}",
+            drive.kind,
+            drive.stage.as_deref().unwrap_or("<unknown>"),
+            yes_no(drive.retryable)
+        ));
+        if let Some(raw) = &drive.raw {
+            debug::debug3(format!("drive.mount raw={}", trim_raw(&debug::redact(raw))));
+        }
+    }
+}
+
 fn map_drive_stage_error(stage: &str, server: &StoredServer, error: ColabError) -> ColabError {
     match error {
         ColabError::ApiError { status, url, body } => {
@@ -1647,8 +1879,18 @@ fn map_drive_stage_error(stage: &str, server: &StoredServer, error: ColabError) 
             )
         }
         ColabError::Network(e) => {
-            let class = classify_network_error(&e.to_string());
-            drive_endpoint_error(stage, server, class, class != "tls", Some(e.to_string()))
+            let class = if e.is_timeout() {
+                "timeout"
+            } else if e.is_connect() {
+                "runtime_endpoint_unreachable"
+            } else {
+                classify_network_error(&e.to_string())
+            };
+            let raw = e
+                .url()
+                .map(|url| format!("{} url={}", e, debug::sanitize_url(url.as_str())))
+                .unwrap_or_else(|| e.to_string());
+            drive_endpoint_error(stage, server, class, class != "tls", Some(raw))
         }
         ColabError::ServerNotFound { endpoint } => drive_endpoint_error(
             stage,
@@ -1696,8 +1938,13 @@ fn drive_endpoint_error(
     retryable: bool,
     raw: Option<String>,
 ) -> ColabError {
+    let kind = if kind == "timeout" {
+        "runtime_endpoint_timeout"
+    } else {
+        kind
+    };
     let message = match kind {
-        "timeout" => "Runtime endpoint timed out",
+        "runtime_endpoint_timeout" => "Runtime endpoint timed out",
         "dns" => "Runtime endpoint DNS lookup failed",
         "connection_refused" => "Runtime endpoint refused the connection",
         "tls" => "Runtime endpoint TLS handshake failed",
@@ -2820,7 +3067,9 @@ fn handle_config_get_key(key: &str, json: bool) -> Result<()> {
 
 fn load_cocli_config() -> Result<config::CocliConfig> {
     let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
-    config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))
+    let cfg = config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+    debug::debug2(format!("settings config loaded path={}", path.display()));
+    Ok(cfg)
 }
 
 fn handle_settings_ui(command: Option<SettingsUiCommands>, ui: Ui, json: bool) -> Result<()> {
@@ -4360,7 +4609,11 @@ fn require_experiment(
     enabled: impl FnOnce(&config::CocliConfig) -> bool,
 ) -> Result<()> {
     let cfg = load_cocli_config()?;
-    if enabled(&cfg) {
+    let is_enabled = enabled(&cfg);
+    debug::debug1(format!(
+        "feature gate checked name={name} enabled={is_enabled} source=config"
+    ));
+    if is_enabled {
         Ok(())
     } else {
         Err(experiment_error(name))
@@ -6096,7 +6349,7 @@ async fn run_remote_tool(
 }
 
 fn resolve_server<'a>(servers: &'a [StoredServer], name: Option<&str>) -> Result<&'a StoredServer> {
-    match name {
+    let selected = match name {
         Some("-") => servers
             .iter()
             .max_by_key(|s| s.date_assigned)
@@ -6111,7 +6364,13 @@ fn resolve_server<'a>(servers: &'a [StoredServer], name: Option<&str>) -> Result
             .iter()
             .max_by_key(|s| s.date_assigned)
             .ok_or_else(|| ColabError::config("no servers assigned")),
-    }
+    }?;
+    debug::debug1(format!("selected session name={:?}", selected.label));
+    debug::debug2(format!(
+        "selected session endpoint={} shape={} variant={}",
+        selected.endpoint, selected.shape, selected.variant
+    ));
+    Ok(selected)
 }
 
 fn latest_server(servers: &[StoredServer]) -> Option<&StoredServer> {
@@ -6124,15 +6383,25 @@ async fn ensure_fresh_token(
     ui: &Ui,
 ) -> Result<StoredServer> {
     let remaining = server.token_expires_at - chrono::Utc::now();
+    debug::debug2(format!(
+        "session token remaining={}s refresh_threshold=300s",
+        remaining.num_seconds()
+    ));
     if remaining.num_seconds() < 5 * 60 {
+        debug::debug1(format!(
+            "session token refresh start name={:?}",
+            server.label
+        ));
         let pb = ui.spinner("Refreshing connection token\u{2026}");
         match manager.refresh(server.id).await {
             Ok(updated) => {
                 Ui::spinner_done(pb, "Token refreshed");
+                debug::debug1("session token refresh ok");
                 Ok(updated)
             }
             Err(e) => {
                 Ui::spinner_fail(pb, &e.to_string());
+                debug::debug1(format!("session token refresh failed error={e}"));
                 Err(e)
             }
         }

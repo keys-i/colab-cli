@@ -6,6 +6,10 @@
 - `--color` stays out of normal help; `--no-color` remains.
 - `status` renders a human panel, not raw JSON.
 - `status --json`, `settings skills list --json`, and `ai tools list --json` contain no ANSI.
+- `-v`, `-vv`, and `-vvv` print `debug1/debug2/debug3` lines to stderr.
+- `--json -v status` keeps stdout valid JSON and writes debug lines to stderr.
+- `--quiet -vvv status` suppresses debug output.
+- Verbose output redacts bearer tokens, cookies, Colab tokens, and token-like query values.
 - `settings` renders sectioned settings.
 - `settings ui` renders saved UI options and direct `settings ui set` persists.
 - `settings experiments` renders all experimental features off by default and saves explicit changes.

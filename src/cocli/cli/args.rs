@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
     version,
     disable_help_subcommand = true,
     override_usage = "colab-cli [OPTIONS] <COMMAND>",
-    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  ai           Agent, MCP, and code tools\n  auth         Google account profiles\n  settings     Config, experiments, support, billing, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
+    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  ai           Agent, MCP, and code tools\n  auth         Google account profiles\n  settings     Config, experiments, support, billing, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n  -v, --verbose\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
 )]
 pub struct Cli {
     #[arg(long, short, global = true, env = "COLAB_QUIET")]
@@ -16,8 +16,8 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    #[arg(long, global = true)]
-    pub verbose: bool,
+    #[arg(long, short = 'v', global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
 
     #[arg(long, global = true, default_value = "auto", value_name = "auto|always|never", value_parser = ["auto", "always", "never"], hide = true)]
     pub color: String,

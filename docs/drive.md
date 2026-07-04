@@ -43,6 +43,8 @@ Use --verbose to see the request details
 
 Human mode strips raw reqwest/HTML/traceback walls. `--verbose` keeps trimmed request details. `--json` returns structured error fields and no ANSI.
 
+Use `-v`, `-vv`, or `-vvv` to debug Drive mount stages. Verbose output goes to stderr and shows stage names, retries, backoff, elapsed time, and sanitized request details.
+
 ## Kernel Requirement
 
 `google.colab.drive.mount()` only works inside a Colab/IPython kernel. It is not safe to run it through a plain remote `python -c` process.

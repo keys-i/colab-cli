@@ -95,6 +95,18 @@ pub struct OutputConfig {
     pub timestamps: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DebugConfig {
+    #[serde(default)]
+    pub verbose_default: u8,
+    #[serde(default = "default_true")]
+    pub redact_private: bool,
+    #[serde(default)]
+    pub show_timestamps: bool,
+    #[serde(default)]
+    pub show_thread_ids: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillsConfig {
     #[serde(default = "default_true")]
@@ -161,6 +173,8 @@ pub struct CocliConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub output: OutputConfig,
+    #[serde(default)]
+    pub debug: DebugConfig,
     #[serde(default)]
     pub skills: SkillsConfig,
     #[serde(default)]

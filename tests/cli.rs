@@ -137,6 +137,85 @@ fn top_level_help_has_final_command_spaces() {
 }
 
 #[test]
+fn verbose_count_parses_and_caps() {
+    let cli = Cli::try_parse_from(["colab-cli", "-v", "status"]).unwrap();
+    assert_eq!(cli.verbose, 1);
+    let cli = Cli::try_parse_from(["colab-cli", "-vv", "status"]).unwrap();
+    assert_eq!(cli.verbose, 2);
+    let cli = Cli::try_parse_from(["colab-cli", "-vvv", "status"]).unwrap();
+    assert_eq!(cli.verbose, 3);
+    let cli = Cli::try_parse_from(["colab-cli", "--verbose", "--verbose", "status"]).unwrap();
+    assert_eq!(cli.verbose, 2);
+}
+
+#[test]
+fn verbose_goes_to_stderr_and_json_stays_clean() {
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .args(["--json", "-v", "status"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(serde_json::from_str::<serde_json::Value>(&stdout).is_ok());
+    assert!(!stdout.contains("debug1:"));
+    assert!(!stdout.contains("\x1b["));
+    assert!(stderr.contains("debug1: command status"));
+    assert!(!stderr.contains("\x1b["));
+}
+
+#[test]
+fn quiet_suppresses_verbose_debug() {
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .args(["--quiet", "-vvv", "status"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(!stderr.contains("debug"));
+}
+
+#[test]
+fn verbose_command_names_cover_major_families() {
+    let home = tempfile::tempdir().unwrap();
+    for (args, expected) in [
+        (["-v", "status"].as_slice(), "debug1: command status"),
+        (
+            ["-v", "session", "list"].as_slice(),
+            "debug1: command session.list",
+        ),
+        (
+            ["-v", "ai", "tools", "list"].as_slice(),
+            "debug1: command ai.tools",
+        ),
+        (
+            ["-v", "settings", "path"].as_slice(),
+            "debug1: command settings.path",
+        ),
+        (
+            ["-v", "auth", "status"].as_slice(),
+            "debug1: command auth.status",
+        ),
+        (
+            ["-v", "run", "pip", "list"].as_slice(),
+            "debug1: command run.pip.list",
+        ),
+        (
+            ["-v", "fs", "drive", "status"].as_slice(),
+            "debug1: command fs.drive.status",
+        ),
+    ] {
+        let out = bin().env("HOME", home.path()).args(args).output().unwrap();
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(stderr.contains(expected), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
 fn hidden_aliases_parse_for_one_cycle() {
     for args in [
         ["colab-cli", "doctor"].as_slice(),
@@ -210,6 +289,8 @@ fn docs_exist() {
         "docs/live-testing.md",
         "docs/google-colab-cli-map.md",
         "docs/colabtools-feature-map.md",
+        "docs/debugging.md",
+        "docs/troubleshooting.md",
         "docs/auth.md",
         "docs/logs.md",
         "docs/run.md",

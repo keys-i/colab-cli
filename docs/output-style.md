@@ -19,6 +19,8 @@ No raw ANSI in JSON. Respect `NO_COLOR`, `--no-color`, `--quiet`, and CI. Persis
 
 Running `colab-cli` with no args prints help. It does not open a launcher.
 
+Verbose diagnostics use `-v`, `-vv`, and `-vvv`. Debug lines go to stderr, are prefixed with `debug1:`, `debug2:`, or `debug3:`, and are not mixed into JSON stdout.
+
 ## Formats
 
 Error:

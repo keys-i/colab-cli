@@ -32,7 +32,7 @@ impl Ui {
     }
 
     pub fn spinner(&self, msg: &str) -> Option<ProgressBar> {
-        if self.quiet || !self.interactive {
+        if self.quiet || !self.interactive || crate::cocli::debug::enabled(1) {
             return None;
         }
         let pb = ProgressBar::new_spinner();

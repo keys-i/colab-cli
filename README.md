@@ -51,7 +51,7 @@ Commands:
 Options:
   -q, --quiet
       --json
-      --verbose
+  -v, --verbose
       --no-color
       --bell
   -h, --help
@@ -67,6 +67,16 @@ colab-cli settings ui set color never
 ```
 
 `--no-color` remains as a one-shot override.
+
+Debugging uses SSH-style verbosity:
+
+```sh
+colab-cli -v status
+colab-cli -vv fs drive mount
+colab-cli --json -v status
+```
+
+Debug lines go to stderr and are redacted. See [Debugging](docs/debugging.md).
 
 ## Command Space
 
@@ -179,6 +189,8 @@ cargo doc --no-deps
 - [Command audit](docs/command-audit.md)
 - [Prune and merge report](docs/prune-and-merge-report.md)
 - [Output style](docs/output-style.md)
+- [Debugging](docs/debugging.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Perf pass](docs/perf-pass.md)
 - [Claims ledger](docs/claims-ledger.md)
 - [QA](docs/qa.md)

@@ -3,6 +3,7 @@ pub mod auth;
 pub mod cli;
 pub mod config;
 pub mod r#continue;
+pub mod debug;
 pub mod env;
 pub mod error;
 pub mod exec;

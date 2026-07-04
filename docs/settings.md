@@ -48,6 +48,12 @@ quiet = false
 verbose = false
 timestamps = false
 
+[debug]
+verbose_default = 0
+redact_private = true
+show_timestamps = false
+show_thread_ids = false
+
 [skills]
 enabled = true
 

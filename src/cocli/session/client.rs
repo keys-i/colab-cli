@@ -521,13 +521,50 @@ impl ColabClient {
 
     async fn colab_request(&self, builder: RequestBuilder) -> Result<Response> {
         let token = (self.get_access_token)().await?;
-        let resp = builder
+        let request = builder
             .header(header::AUTHORIZATION, format!("Bearer {token}"))
             .header(header::ACCEPT, ACCEPT_JSON)
             .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
-            .send()
-            .await?;
-        let url = resp.url().to_string();
+            .build()?;
+        let method = request.method().to_string();
+        let url = request.url().to_string();
+        let path = crate::cocli::debug::method_path(&url);
+        crate::cocli::debug::debug2(format!("http request method={method} path={path}"));
+        crate::cocli::debug::debug3(format!(
+            "http request url={}",
+            crate::cocli::debug::sanitize_url(&url)
+        ));
+        let started = std::time::Instant::now();
+        let resp = match self.http.execute(request).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                crate::cocli::debug::debug1(format!(
+                    "http {} method={} path={} elapsed={:.3}s retryable={}",
+                    reqwest_error_kind(&e),
+                    method,
+                    path,
+                    started.elapsed().as_secs_f64(),
+                    yes_no(e.is_timeout() || e.is_connect())
+                ));
+                crate::cocli::debug::debug3(format!(
+                    "reqwest error kind={} url={} source={}",
+                    reqwest_error_kind(&e),
+                    e.url()
+                        .map(|url| crate::cocli::debug::sanitize_url(url.as_str()))
+                        .unwrap_or_else(|| "<none>".to_string()),
+                    e
+                ));
+                return Err(e.into());
+            }
+        };
+        let status = resp.status();
+        crate::cocli::debug::debug2(format!(
+            "http response method={} path={} status={} elapsed={:.3}s",
+            method,
+            path,
+            status.as_u16(),
+            started.elapsed().as_secs_f64()
+        ));
         self.check_status_raw(resp, &url).await
     }
 
@@ -536,7 +573,23 @@ impl ColabClient {
             return Ok(resp);
         }
         let status = resp.status().as_u16();
+        let content_type = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("<unknown>")
+            .to_string();
         let body = resp.text().await.ok();
+        crate::cocli::debug::debug2(format!(
+            "http status={} content_type={} url={}",
+            status,
+            content_type,
+            crate::cocli::debug::sanitize_url(url)
+        ));
+        if let Some(body) = &body {
+            crate::cocli::debug::debug2(format!("http body summary={}", body_summary(body, 300)));
+            crate::cocli::debug::debug3(format!("http body={}", body_summary(body, 2000)));
+        }
         match status {
             412 => Err(ColabError::TooManyAssignments),
             404 => Err(ColabError::ServerNotFound {
@@ -563,6 +616,42 @@ fn encode_contents_path(remote_path: &str) -> String {
         .map(|seg| urlencoding::encode(seg).into_owned())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn body_summary(body: &str, limit: usize) -> String {
+    let redacted = crate::cocli::debug::redact(body);
+    let lower = redacted.to_ascii_lowercase();
+    let summary = if lower.contains("<html") {
+        html_title(&redacted).unwrap_or_else(|| "html response".to_string())
+    } else {
+        redacted
+    };
+    summary.chars().take(limit).collect()
+}
+
+fn html_title(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    let start = lower.find("<title>")? + "<title>".len();
+    let end = lower[start..].find("</title>")? + start;
+    Some(body[start..end].trim().to_string())
+}
+
+fn reqwest_error_kind(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_status() {
+        "status"
+    } else if error.is_decode() {
+        "decode"
+    } else {
+        "unknown"
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
 }
 
 #[doc(hidden)]
