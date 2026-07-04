@@ -1,8 +1,8 @@
 # UI
 
-`colab-cli` has two output modes.
+`colab-cli` has human output and JSON output.
 
-Interactive terminals get colour and a small launcher when no command is passed:
+Interactive terminals get colour and simple prompts only where selection helps:
 
 ```sh
 colab-cli
@@ -12,7 +12,7 @@ Scripts should use explicit commands:
 
 ```sh
 colab-cli status --json
-colab-cli settings skills list --json
+colab-cli ai tools list --json
 ```
 
 ## Gates
@@ -27,7 +27,7 @@ No animation, colour-only decoration, launcher prompts, or fun lines are printed
 - `COLAB_NO_INTERACTIVE=1` is set
 - `ui.tui = "never"` is configured
 
-The current launcher is deliberately small. It prints quick actions without command previews. A full-screen TUI can come later if the command flows prove they need it.
+The no-command fallback is deliberately small. It does not print Quick Actions or command previews.
 
 ## Status
 
@@ -40,6 +40,10 @@ cocli status
 Auth       ✓ ready
 Session    ! no active session
 Runtime    · pick a session first
+Files      ✓ cache writable
+Drive      · not checked
+
+fix: run colab-cli session list
 ```
 
 JSON is only printed with `--json`.

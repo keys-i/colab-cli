@@ -25,7 +25,7 @@ Error:
 
 ```text
 error: what failed
-next: exact command to try
+fix: exact command to try
 ```
 
 Dry-run:
@@ -43,3 +43,5 @@ trainer    ready    run script
 ```
 
 No giant banners. Fun lines never appear in JSON, quiet output, security failures, auth failures, or data-loss paths.
+
+No Quick Actions, command previews, or key hints are printed unless the command actually implements that interaction.

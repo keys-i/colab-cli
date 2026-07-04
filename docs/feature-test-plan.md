@@ -18,7 +18,8 @@ Coverage:
 - Drive mount uses a kernel cell helper, not plain `python -c`
 - Drive kernel-context failures map to a friendly error
 - Drive status parsing handles mounted, not mounted, and unknown
-- settings skills output is a catalog, not raw debug rows
+- `ai tools list` and `settings skills list` output catalogs, not raw debug rows
+- experiments are off by default and block gated commands with a short enable hint
 
 ## CLI Parse And Help
 
@@ -81,6 +82,14 @@ Production commands:
 - `slurp resume --dry-run`
 - `fleet plan --dry-run`
 - `fleet plan --cost`
+- `ai`
+- `ai tools list`
+- `ai tools list --json`
+- `ai tools inspect slurp.plan`
+- `ai mcp`
+- `ai mcp serve --stdio`
+- `ai plan`
+- `ai audit`
 - `auth list`
 - `auth status`
 - `auth export-redacted`
@@ -89,6 +98,10 @@ Production commands:
 - `settings path`
 - `settings edit`
 - `settings reset`
+- `settings experiments`
+- `settings experiments get`
+- `settings experiments set mcp-server true`
+- `settings experiments reset`
 - `settings skills list`
 - `settings skills list --json`
 - `settings skills inspect slurp.plan`
@@ -105,12 +118,13 @@ Keep for one cycle if they stay cheap:
 - `mount drive` -> `fs drive mount`
 - `runtime gpu` -> `status runtime --gpu`
 - `runtime backend-info` -> `status runtime --backend`
-- `tools list` -> `settings skills list`
+- `tools list` -> `ai tools list`
 - `config path` -> `settings path`
 - `doctor` -> `status check`
 - `exec py` -> `run py`
 - `env install` -> `run install`
-- `bug-report` -> `settings support bug-report` when support subcommands exist
+- `agent` -> `ai`
+- `bug-report` -> `settings support bug-report`
 
 Aliases must not appear in normal help.
 
@@ -118,9 +132,9 @@ Aliases must not appear in normal help.
 
 - `fleet status`
 - `fleet logs`
-- `settings support bug-report`
+- transport MCP server
 
-These stay out of production help until there is real behaviour behind them.
+These stay out of production help or fail behind experiment gates until there is real behaviour behind them.
 
 ## Live Smoke
 

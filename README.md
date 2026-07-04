@@ -1,6 +1,6 @@
 # colab-cli
 
-Rust CLI for Google Colab sessions, execution, file transfer, continuation bundles, Slurp plans, and local diagnostics.
+Rust CLI for Google Colab sessions, execution, file transfer, continuation bundles, Slurp plans, local diagnostics, and agent-facing tool metadata.
 
 Running `colab-cli` with no command opens a small launcher when stdin and stdout are interactive. Scripts should call explicit commands and use `--json` when they need machine output.
 
@@ -16,11 +16,11 @@ colab-cli fs pull /content/checkpoints ./checkpoints
 colab-cli session stop --name train
 ```
 
-Built-in skills are visible through settings:
+Agent-facing tools are visible through `ai`:
 
 ```sh
-colab-cli settings skills list
-colab-cli settings skills inspect slurp.plan
+colab-cli ai tools list
+colab-cli ai tools inspect slurp.plan
 ```
 
 Continuation bundle:
@@ -63,11 +63,12 @@ colab-cli fs drive unmount --session trainer
 colab-cli run install torch transformers --session trainer
 colab-cli status runtime --backend
 colab-cli status runtime --fit llama-7b
-colab-cli settings skills list
+colab-cli ai tools list
+colab-cli settings experiments
 colab-cli status quick
 ```
 
-Compatibility groups `server` and `file` still parse. Hidden aliases cover cheap old `colab new`, `colab sessions`, `colab upload`, and `colab download` forms with migration hints.
+Compatibility groups and old aliases parse where migration is cheap. They stay hidden from normal help and print a migration hint when used.
 
 ## Layout
 
@@ -84,10 +85,11 @@ src/
     runtime/
     slurp/
     fleet/
+    agent/
     continue/
     tools/
     config/
-    release/    private maintainer helpers
+    release/    internal naming helpers
     ui/
     util/
 ```
@@ -133,12 +135,13 @@ Research notes live in [docs/research.md](docs/research.md). The current build p
 - [Drive](docs/drive.md)
 - [UI](docs/ui.md)
 - [Settings](docs/settings.md)
+- [AI](docs/ai.md)
+- [MCP](docs/mcp.md)
 - [Skills](docs/skills.md)
 - [Feature test plan](docs/feature-test-plan.md)
 - [Live testing](docs/live-testing.md)
 - [Easter eggs](docs/easter-eggs.md)
 - [Continuation](docs/continuation.md)
-- [Tools](docs/tools.md)
 - [Performance](docs/performance.md)
 - [Benchmark plan](docs/benchmark-plan.md)
 - [Benchmark results](docs/benchmark-results.md)
@@ -149,7 +152,6 @@ Research notes live in [docs/research.md](docs/research.md). The current build p
 - [QA](docs/qa.md)
 - [Usability study](docs/usability-study.md)
 - [Publishing](docs/publishing.md)
-- [Release](docs/release.md)
 - [CI/CD](docs/ci-cd.md)
 - [Migration from google-colab-cli](docs/migration-from-google-colab-cli.md)
 - [Research notes](docs/research-notes.md)

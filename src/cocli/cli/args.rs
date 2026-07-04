@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
     version,
     disable_help_subcommand = true,
     override_usage = "colab-cli [OPTIONS] <COMMAND>",
-    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  continue     Checkpoint and resume work\n  slurp        Tiny TOML workflows\n  fleet        Compliant runtime planning\n  auth         Google account profiles\n  settings     Config, skills, support, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --color <auto|always|never>\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
+    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  continue     Checkpoint and resume work\n  slurp        Tiny TOML workflows\n  fleet        Compliant runtime planning\n  ai           Agent, MCP, and tool workflows\n  auth         Google account profiles\n  settings     Config, experiments, support, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --color <auto|always|never>\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
 )]
 pub struct Cli {
     #[arg(long, short, global = true, env = "COLAB_QUIET")]
@@ -85,6 +85,12 @@ pub enum Commands {
     Fleet {
         #[command(subcommand)]
         command: FleetCommands,
+    },
+    /// Agent, MCP, and tool workflows
+    #[command(display_order = 75)]
+    Ai {
+        #[command(subcommand)]
+        command: Option<AiCommands>,
     },
     /// Google account profiles
     #[command(display_order = 80)]
@@ -212,6 +218,12 @@ pub struct SessionNewArgs {
     pub tpu: Option<String>,
     #[arg(long = "high-ram")]
     pub high_ram: bool,
+    #[arg(long, value_parser = ["standard", "high-ram"])]
+    pub shape: Option<String>,
+    #[arg(long, default_value_t = 3)]
+    pub retries: u8,
+    #[arg(long)]
+    pub no_retry: bool,
     #[arg(long, short = 'k')]
     pub keepalive: bool,
 }
@@ -457,7 +469,7 @@ pub enum FsDriveCommands {
         path: String,
         #[arg(long)]
         dry_run: bool,
-        #[arg(long, default_value_t = 120)]
+        #[arg(long, default_value_t = 180)]
         timeout: u64,
         #[arg(long)]
         open: bool,
@@ -672,11 +684,15 @@ pub enum SettingsCommands {
         #[command(subcommand)]
         command: Option<SettingsUiCommands>,
     },
+    Experiments {
+        #[command(subcommand)]
+        command: Option<SettingsExperimentsCommands>,
+    },
     Support {
         #[command(subcommand)]
         command: SupportCommands,
     },
-    #[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+    #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
     #[command(hide = true)]
     Dev {
         #[command(subcommand)]
@@ -730,7 +746,15 @@ pub enum SkillCommands {
 pub enum SettingsUiCommands {
     Get { key: Option<String> },
     Set { key: String, value: String },
+    Reset,
     Preview,
+}
+
+#[derive(Subcommand)]
+pub enum SettingsExperimentsCommands {
+    Get { key: Option<String> },
+    Set { key: String, value: String },
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -745,7 +769,7 @@ pub enum SupportCommands {
     Bundle,
 }
 
-#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+#[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 #[derive(Subcommand)]
 pub enum DevCommands {
     Release {
@@ -781,6 +805,56 @@ pub enum AgentCommands {
     ExplainSlurp {
         config: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum AiCommands {
+    Tools {
+        #[command(subcommand)]
+        command: Option<AiToolsCommands>,
+    },
+    Mcp {
+        #[command(subcommand)]
+        command: Option<AiMcpCommands>,
+    },
+    Plan {
+        goal: String,
+        #[arg(long)]
+        out: Option<String>,
+    },
+    Audit {
+        plan_file: String,
+    },
+    Explain {
+        plan_file: String,
+    },
+    Run {
+        plan_file: String,
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum AiToolsCommands {
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Inspect {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum AiMcpCommands {
+    Serve {
+        #[arg(long)]
+        stdio: bool,
+    },
+    Tools,
 }
 
 #[derive(Subcommand)]
@@ -1120,15 +1194,49 @@ mod tests {
         assert!(Cli::try_parse_from(["colab-cli", "status", "runtime", "--gpu"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "fs", "drive", "mount"]).is_ok());
         assert!(
+            Cli::try_parse_from([
+                "colab-cli",
+                "session",
+                "new",
+                "--shape",
+                "standard",
+                "--retries",
+                "2"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["colab-cli", "session", "new", "--no-retry"]).is_ok());
+        assert!(
             Cli::try_parse_from(["colab-cli", "settings", "skills", "inspect", "slurp.plan"])
                 .is_ok()
         );
+        assert!(Cli::try_parse_from(["colab-cli", "settings", "experiments"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "settings", "experiments", "get"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "colab-cli",
+                "settings",
+                "experiments",
+                "set",
+                "fleet",
+                "true"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["colab-cli", "settings", "experiments", "reset"]).is_ok());
         assert!(
             Cli::try_parse_from(["colab-cli", "fleet", "plan", "--config", "slurp.toml"]).is_ok()
         );
         assert!(Cli::try_parse_from(["colab-cli", "slurp", "explain"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "tools", "list"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "tools", "inspect", "slurp.plan"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "mcp"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "mcp", "serve", "--stdio"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "plan", "train"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "audit", "plan.toml"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "release", "name", "v0.4.2"]).is_err());
-        #[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+        #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
         assert!(
             Cli::try_parse_from(["colab-cli", "settings", "dev", "release", "name", "v0.4.2"])
                 .is_ok()

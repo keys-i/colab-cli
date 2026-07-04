@@ -17,13 +17,13 @@ It should make normal Colab work less annoying:
 ## What Done Looks Like
 
 - [ ] command space follows `colab-cli <space> <command> <flags>`
-- [ ] `session`, `run`, `fs`, `status`, `continue`, `slurp`, and `settings` cover the main path
+- [ ] `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `ai`, `auth`, and `settings` cover the public path
 - [ ] `fs sync --dry-run` is trustworthy
 - [ ] continuation is checkpoint/replay and says so clearly
 - [ ] Slurp config can be explained before it runs
-- [ ] status commands give one next action
+- [ ] status commands give one `fix:` line only when something is wrong
 - [ ] JSON output has no ANSI
-- [ ] no-command launcher is useful without hurting scripts
+- [ ] no-command fallback is useful without Quick Actions or command previews
 - [ ] fun output never appears in CI, JSON, quiet mode, or serious errors
 - [ ] benchmarks compare against google-colab-cli and manual workflows
 - [ ] README claims match `docs/claims-ledger.md`
@@ -45,7 +45,7 @@ It should make normal Colab work less annoying:
 - live Python memory migration
 - plugin marketplace
 - giant TUI
-- magic agent autonomy
+- hidden agent execution
 - official Google replacement claim
 
 ## Risks
@@ -58,12 +58,12 @@ It should make normal Colab work less annoying:
 
 ## Next Implementation Pass
 
-- clean up command aliases
-- make `status quick` tighter
+- keep old aliases hidden with migration hints only
+- keep `status` human by default and JSON only with `--json`
+- keep experiments off by default
 - make `fs changed` compare against a real remote/cache manifest
 - finish compact output style
-- keep the launcher small and command-preview based
-- finish `slurp explain`
+- finish `slurp explain` polish
 - add redacted bug report output checks
 - run the Drive live smoke once with a real Colab kernel and browser approval
 - run first real competitor benchmark pass

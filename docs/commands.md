@@ -6,7 +6,7 @@ Command shape:
 colab-cli <space> <command> <flags>
 ```
 
-Public spaces: `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `auth`, `settings`, `completions`.
+Public spaces: `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `ai`, `auth`, `settings`, `completions`.
 
 Hidden aliases exist for one migration cycle where they are cheap. They do not appear in normal help.
 
@@ -86,7 +86,7 @@ colab-cli status run
 colab-cli status paths
 ```
 
-`status quick` is the short local check. It should print one useful next action.
+`status` is a cheap local check by default. It prints one `fix:` line only when something needs attention.
 
 ## Continue
 
@@ -111,7 +111,23 @@ colab-cli slurp explain
 colab-cli fleet plan --config slurp.toml --cost
 ```
 
-Fleet execution is deferred. Planning and compliance checks are local and do not bypass Colab rules.
+Fleet/distributed planning is experimental and disabled by default. Enable it through `colab-cli settings experiments` before using `fleet plan`. It must not bypass Colab rules or quotas.
+
+## AI
+
+```sh
+colab-cli ai
+colab-cli ai tools list
+colab-cli ai tools inspect slurp.plan
+colab-cli ai plan "summarise a workflow"
+colab-cli ai audit plan.toml
+colab-cli ai explain plan.toml
+colab-cli ai run plan.toml --confirm
+colab-cli ai mcp
+colab-cli ai mcp serve --stdio
+```
+
+`ai tools list` is read-only and available by default. MCP serving and `ai run` are disabled until enabled under `settings experiments`. Plans are inspectable and do not execute hidden Colab work.
 
 ## Settings
 
@@ -122,22 +138,30 @@ colab-cli settings path
 colab-cli settings edit
 colab-cli settings ui get
 colab-cli settings ui set animations false
+colab-cli settings ui reset
 colab-cli settings ui preview
+colab-cli settings experiments
+colab-cli settings experiments get
+colab-cli settings experiments set mcp-server true
+colab-cli settings experiments reset
 colab-cli settings skills list
 colab-cli settings skills inspect slurp.plan
 colab-cli settings skills run slurp.plan --json-input '{}'
+colab-cli settings support bug-report
 ```
 
-Skills are optional agent/tool surfaces. Core work stays in normal commands.
+Skills and AI tools are optional agent/tool surfaces. Core work stays in normal commands.
 
 ## Migration Aliases
 
 ```text
 exec      -> run
 env       -> run install/freeze/restore
-mount     -> fs drive
-runtime   -> status runtime
-tools     -> settings skills
-config    -> settings
-doctor    -> status check
+mount      -> fs drive
+runtime    -> status runtime
+tools      -> ai tools, or settings skills for legacy scripts
+config     -> settings
+doctor     -> status check
+agent      -> ai
+bug-report -> settings support bug-report
 ```

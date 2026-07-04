@@ -1,13 +1,13 @@
 # Tools
 
-The old tools surface is now `settings skills`.
+The old top-level `tools` surface is now `ai tools`.
 
 Use:
 
 ```sh
-colab-cli settings skills list
-colab-cli settings skills inspect slurp.plan
+colab-cli ai tools list
+colab-cli ai tools inspect slurp.plan
 colab-cli settings skills run slurp.plan --json-input '{}'
 ```
 
-See [skills.md](skills.md) for the current catalog format.
+See [ai.md](ai.md) and [skills.md](skills.md) for the current catalog format.

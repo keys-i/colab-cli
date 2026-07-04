@@ -33,7 +33,7 @@ The command shape is:
 colab-cli <space> <command> <flags>
 ```
 
-That is a little longer than `colab exec`, but it gives the command tree room to stay readable. The current public spaces are `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `auth`, `settings`, and `completions`. I collapsed the older `exec`, `env`, `mount`, `runtime`, `tools`, `config`, and `doctor` spaces because they made users remember too many ways to ask the same question.
+That is a little longer than `colab exec`, but it gives the command tree room to stay readable. The current public spaces are `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `ai`, `auth`, `settings`, and `completions`. I collapsed the older `exec`, `env`, `mount`, `runtime`, `tools`, `config`, and `doctor` spaces because they made users remember too many ways to ask the same question.
 
 I kept the Rust code as one internal `src/cocli/` module tree. The Rust Book's module guidance fits this better than a pile of small crates right now: group code by responsibility, keep details private, and extract later when a boundary is real. Cargo workspaces are useful, but they add release and versioning work. This project does not have a stable public API split yet.
 
@@ -53,7 +53,7 @@ Status checks should tell users what to run next. A stack trace is not a diagnos
 - plugin marketplace
 - giant TUI
 - fake terminal vibration
-- "agent runs everything for you" mode
+- hidden agent execution
 
 Some of this sounded cool at first, but it creates more problems than it solves. The CLI should help with normal Colab work, not encourage policy problems or hide risky actions.
 

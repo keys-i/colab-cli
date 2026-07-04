@@ -1,8 +1,10 @@
 # Skills
 
-Skills are optional agent/tool surfaces exposed through settings. Core product work stays in normal commands.
+Skills are optional agent/tool surfaces exposed through `ai tools` and `settings skills`. Core product work stays in normal commands.
 
 ```sh
+colab-cli ai tools list
+colab-cli ai tools inspect slurp.plan
 colab-cli settings skills list
 colab-cli settings skills inspect slurp.plan
 colab-cli settings skills run slurp.plan --json-input '{}'

@@ -23,7 +23,7 @@ pub enum ColabError {
     #[error("account blocked from Colab servers due to suspected abuse")]
     AccountDenylisted,
 
-    #[error("API request failed: {status} {url}{}", body.as_deref().map(|b| format!("\n  body: {b}")).unwrap_or_default())]
+    #[error("Colab returned HTTP {status}")]
     ApiError {
         status: u16,
         url: String,

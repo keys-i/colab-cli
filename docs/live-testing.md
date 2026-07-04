@@ -19,9 +19,9 @@ target/live-smoke.md
 - `status runtime --all`
 - `fs ls /content`
 - `fs drive status`
-- `fs drive mount --timeout 120`
-- `settings skills list`
-- `settings skills list --json`
+- `fs drive mount --timeout 180`
+- `ai tools list`
+- `ai tools list --json`
 - `status check`
 
 ## Drive Approval
@@ -32,4 +32,4 @@ The script must never hang forever and must not stop or delete sessions it did n
 
 ## Not Covered
 
-The live smoke is not a full Colab compatibility suite. It does not prove long-running notebook execution, Drive behaviour in Colab Enterprise, or continuation replay under real failure. Those need focused manual tests.
+The live smoke is not a full Colab compatibility suite. It does not prove long-running notebook execution, Drive behaviour in Colab Enterprise, assignment retries under real 503/429 responses, or continuation replay under real failure. Those need focused manual tests.

@@ -134,6 +134,22 @@ pub struct DevConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ExperimentsConfig {
+    #[serde(default)]
+    pub multi_login: bool,
+    #[serde(default)]
+    pub fleet: bool,
+    #[serde(default)]
+    pub mcp_server: bool,
+    #[serde(default)]
+    pub ai_plan_runner: bool,
+    #[serde(default)]
+    pub slurp_automation: bool,
+    #[serde(default)]
+    pub background_live_checks: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CocliConfig {
     #[serde(default)]
     pub ui: UiConfig,
@@ -143,6 +159,8 @@ pub struct CocliConfig {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub support: SupportConfig,
+    #[serde(default)]
+    pub experiments: ExperimentsConfig,
     #[serde(default)]
     pub dev: DevConfig,
 }

@@ -548,9 +548,8 @@ impl ColabClient {
 
     async fn parse_json<T: DeserializeOwned>(&self, resp: Response) -> Result<T> {
         let body = resp.text().await?;
-        serde_json::from_str(strip_xssi(&body)).map_err(|e| {
-            ColabError::parse(format!("failed to parse API response: {e}\nbody: {body}"))
-        })
+        serde_json::from_str(strip_xssi(&body))
+            .map_err(|e| ColabError::parse(format!("failed to parse API response: {e}")))
     }
 }
 

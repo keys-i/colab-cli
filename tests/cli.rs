@@ -13,7 +13,7 @@ fn parses_major_command_spaces() {
         ["colab-cli", "run", "install", "torch"].as_slice(),
         ["colab-cli", "fs", "changed", ".", "/content"].as_slice(),
         ["colab-cli", "fs", "drive", "mount"].as_slice(),
-        ["colab-cli", "fs", "drive", "mount", "--timeout", "120"].as_slice(),
+        ["colab-cli", "fs", "drive", "mount", "--timeout", "180"].as_slice(),
         ["colab-cli", "fs", "drive", "status"].as_slice(),
         ["colab-cli", "fs", "drive", "list"].as_slice(),
         ["colab-cli", "status", "runtime", "--gpu"].as_slice(),
@@ -29,7 +29,27 @@ fn parses_major_command_spaces() {
         ["colab-cli", "settings", "ui", "get"].as_slice(),
         ["colab-cli", "settings", "ui", "set", "animations", "false"].as_slice(),
         ["colab-cli", "settings", "ui", "preview"].as_slice(),
+        ["colab-cli", "settings", "experiments"].as_slice(),
+        ["colab-cli", "settings", "experiments", "get"].as_slice(),
+        [
+            "colab-cli",
+            "settings",
+            "experiments",
+            "set",
+            "fleet",
+            "true",
+        ]
+        .as_slice(),
+        ["colab-cli", "settings", "experiments", "reset"].as_slice(),
         ["colab-cli", "settings", "support", "bug-report"].as_slice(),
+        ["colab-cli", "ai"].as_slice(),
+        ["colab-cli", "ai", "tools"].as_slice(),
+        ["colab-cli", "ai", "tools", "list"].as_slice(),
+        ["colab-cli", "ai", "tools", "inspect", "slurp.plan"].as_slice(),
+        ["colab-cli", "ai", "mcp"].as_slice(),
+        ["colab-cli", "ai", "mcp", "serve", "--stdio"].as_slice(),
+        ["colab-cli", "ai", "plan", "train a model"].as_slice(),
+        ["colab-cli", "ai", "audit", "plan.toml"].as_slice(),
         ["colab-cli", "continue", "last"].as_slice(),
         ["colab-cli", "settings", "path"].as_slice(),
         ["colab-cli", "settings", "locate"].as_slice(),
@@ -51,6 +71,7 @@ fn top_level_help_has_final_command_spaces() {
         "continue",
         "slurp",
         "fleet",
+        "ai",
         "auth",
         "settings",
         "completions",
@@ -85,7 +106,8 @@ fn json_output_has_no_ansi() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(!stdout.contains("\x1b["));
-    assert!(stdout.contains("next_actions"));
+    assert!(serde_json::from_str::<serde_json::Value>(&stdout).is_ok());
+    assert!(stdout.contains("fix"));
 }
 
 #[test]
@@ -96,6 +118,8 @@ fn status_human_output_is_not_json() {
     assert!(stdout.contains("cocli status"));
     assert!(stdout.contains("Auth"));
     assert!(!stdout.trim_start().starts_with('{'));
+    assert!(!stdout.contains("Quick Actions"));
+    assert!(!stdout.contains("\nNext\n"));
 }
 
 #[test]
@@ -103,9 +127,10 @@ fn no_command_shows_launcher_fallback_in_non_tty() {
     let out = bin().output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("cocli"));
-    assert!(stdout.contains("Quick actions"));
-    assert!(stdout.contains("Run `colab-cli --help` for commands."));
+    assert!(stdout.contains("Google Colab from the terminal"));
+    assert!(stdout.contains("run: colab-cli --help"));
+    assert!(!stdout.contains("Quick actions"));
+    assert!(!stdout.contains("command preview"));
 }
 
 #[test]
@@ -154,7 +179,7 @@ fn settings_skills_list_is_catalog_not_debug_rows() {
     let out = bin().args(["settings", "skills", "list"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("Skill"));
+    assert!(stdout.contains("Tool"));
     assert!(stdout.contains("slurp.plan"));
     assert!(stdout.contains("slurp.explain"));
     assert!(stdout.contains("fleet.plan"));
@@ -165,6 +190,8 @@ fn settings_skills_list_is_catalog_not_debug_rows() {
     assert!(!stdout.contains("fs.push"));
     assert!(!stdout.contains("session_new"));
     assert!(!stdout.contains("session=false"));
+    assert!(!stdout.contains("enter inspect"));
+    assert!(!stdout.contains("/ search"));
 }
 
 #[test]
@@ -187,14 +214,55 @@ fn settings_skills_json_has_stable_fields() {
 
 #[test]
 fn settings_default_renders_sections() {
-    let out = bin().arg("settings").output().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .arg("settings")
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("Settings"));
     assert!(stdout.contains("General"));
     assert!(stdout.contains("UI"));
-    assert!(stdout.contains("Skills"));
+    assert!(stdout.contains("Experiments"));
+    assert!(stdout.contains("AI"));
+    assert!(!stdout.contains("Dev"));
+    assert!(!stdout.contains("Quick Actions"));
     assert!(!stdout.trim_start().starts_with('{'));
+}
+
+#[test]
+fn settings_experiments_default_off_and_persist() {
+    let home = tempfile::tempdir().unwrap();
+    let list = bin()
+        .env("HOME", home.path())
+        .args(["settings", "experiments"])
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    let stdout = String::from_utf8(list.stdout).unwrap();
+    assert!(stdout.contains("[ ] Multi-login"));
+    assert!(stdout.contains("[ ] Fleet/distributed planning"));
+    assert!(stdout.contains("[ ] MCP server"));
+    assert!(stdout.contains("[ ] AI plan runner"));
+    assert!(stdout.contains("[ ] Slurp automation"));
+    assert!(!stdout.contains("Quick Actions"));
+
+    let set = bin()
+        .env("HOME", home.path())
+        .args(["settings", "experiments", "set", "mcp-server", "true"])
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    let get = bin()
+        .env("HOME", home.path())
+        .args(["settings", "experiments", "get", "mcp-server"])
+        .output()
+        .unwrap();
+    assert!(get.status.success());
+    assert_eq!(String::from_utf8(get.stdout).unwrap().trim(), "true");
 }
 
 #[test]
@@ -217,7 +285,65 @@ fn settings_ui_set_persists_in_temp_config() {
     assert_eq!(stdout.trim(), "false");
 }
 
-#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+#[test]
+fn ai_tools_list_is_agent_catalog() {
+    let out = bin().args(["ai", "tools", "list"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("AI tools"));
+    assert!(stdout.contains("Agent-friendly workflows"));
+    assert!(stdout.contains("slurp.plan"));
+    assert!(stdout.contains("mcp.tools"));
+    assert!(!stdout.contains("session.new"));
+    assert!(!stdout.contains("session=false"));
+    assert!(!stdout.contains("Quick Actions"));
+}
+
+#[test]
+fn ai_tools_json_is_clean() {
+    let out = bin()
+        .args(["--json", "ai", "tools", "list"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(!stdout.contains("\x1b["));
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "slurp.plan")
+    );
+}
+
+#[test]
+fn ai_mcp_and_run_are_experiment_gated() {
+    let home = tempfile::tempdir().unwrap();
+    let mcp = bin()
+        .env("HOME", home.path())
+        .args(["ai", "mcp"])
+        .output()
+        .unwrap();
+    assert!(!mcp.status.success());
+    let stderr = String::from_utf8(mcp.stderr).unwrap();
+    assert!(stderr.contains("experimental feature disabled"));
+    assert!(stderr.contains("enable: colab-cli settings experiments"));
+
+    let plan = home.path().join("plan.toml");
+    std::fs::write(&plan, "confirm_required = true\n").unwrap();
+    let run = bin()
+        .env("HOME", home.path())
+        .args(["ai", "run", plan.to_str().unwrap(), "--confirm"])
+        .output()
+        .unwrap();
+    assert!(!run.status.success());
+    let stderr = String::from_utf8(run.stderr).unwrap();
+    assert!(stderr.contains("experimental feature disabled"));
+}
+
+#[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 #[test]
 fn dev_release_is_maintainer_gated() {
     let home = tempfile::tempdir().unwrap();
@@ -237,6 +363,7 @@ fn dev_release_is_maintainer_gated() {
         .env("HOME", home.path())
         .env("USER", "not-keys")
         .env("COLAB_CLI_OWNER", "keys")
+        .env("COLAB_CLI_DEV", "1")
         .env("COLAB_CLI_MAINTAINER", "1")
         .args(["settings", "dev", "release", "name"])
         .output()

@@ -7,14 +7,15 @@ use colored::Colorize;
 
 use crate::cocli::auth;
 use crate::cocli::cli::{
-    AgentCommands, AuthCommands, AuthProfileArgs, Cli, Commands, CompatTransferArgs,
-    ConfigCommands, ContinueCommands, EnvCommands, ExecCommands, FileCommands, FleetCommands,
-    FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, MountCommands,
-    RunCommands, RuntimeCommands, ServerCommands, SessionCommands, SessionNameArg, SessionNewArgs,
-    SettingsCommands, SettingsUiCommands, SkillCommands, SlurpCommands, StatusCommands,
-    SupportCommands, ToolsCommands,
+    AgentCommands, AiCommands, AiMcpCommands, AiToolsCommands, AuthCommands, AuthProfileArgs, Cli,
+    Commands, CompatTransferArgs, ConfigCommands, ContinueCommands, EnvCommands, ExecCommands,
+    FileCommands, FleetCommands, FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands,
+    FsSyncArgs, MountCommands, RunCommands, RuntimeCommands, ServerCommands, SessionCommands,
+    SessionNameArg, SessionNewArgs, SettingsCommands, SettingsExperimentsCommands,
+    SettingsUiCommands, SkillCommands, SlurpCommands, StatusCommands, SupportCommands,
+    ToolsCommands,
 };
-#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+#[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 use crate::cocli::cli::{DevCommands, ReleaseCommands};
 use crate::cocli::config::{self, ColabConfig};
 use crate::cocli::error::{ColabError, Result};
@@ -53,18 +54,7 @@ pub async fn main_entry() {
         if json_mode {
             print_error_json(&e, verbose);
         } else {
-            ui.error(&e.to_string());
-            if let ColabError::Drive {
-                next_action, raw, ..
-            } = &e
-            {
-                if let Some(next) = next_action {
-                    eprintln!("  next: {next}");
-                }
-                if verbose && let Some(raw) = raw {
-                    eprintln!("\n{raw}");
-                }
-            }
+            print_human_error(&e, verbose, ui);
         }
         if ring_bell {
             eprint!("\x07");
@@ -88,6 +78,24 @@ pub async fn main_entry() {
 
 fn print_error_json(e: &ColabError, verbose: bool) {
     let error = match e {
+        ColabError::ApiError { status, url, body } => {
+            let mut value = serde_json::json!({
+                "kind": error_kind(e),
+                "status": status,
+                "reason": http_reason(*status),
+                "operation": api_operation(url),
+                "retryable": retryable_status(*status),
+                "message": api_message(*status, url),
+                "fix": api_fix(*status, url),
+            });
+            if verbose {
+                value["url"] = serde_json::Value::String(url.clone());
+                if let Some(body) = body {
+                    value["raw"] = serde_json::Value::String(trim_raw(body));
+                }
+            }
+            value
+        }
         ColabError::Drive {
             kind,
             message,
@@ -120,6 +128,48 @@ fn print_error_json(e: &ColabError, verbose: bool) {
     );
 }
 
+fn print_human_error(e: &ColabError, verbose: bool, ui: Ui) {
+    match e {
+        ColabError::ApiError { status, url, body } => {
+            ui.error(&format!("{} failed", api_operation(url)));
+            eprintln!();
+            eprintln!("Colab returned {} {}", status, http_reason(*status));
+            if url.contains("/assign") && url.contains("shape=hm") {
+                eprintln!("shape: High-RAM CPU");
+            }
+            eprintln!("retryable: {}", yes_no(retryable_status(*status)));
+            eprintln!();
+            eprintln!("{}", api_message(*status, url));
+            if let Some(fix) = api_fix(*status, url) {
+                eprintln!();
+                eprintln!("try: {fix}");
+            }
+            if verbose {
+                eprintln!();
+                eprintln!("url: {url}");
+                if let Some(body) = body {
+                    eprintln!("body: {}", trim_raw(body));
+                }
+            } else if body.is_some() {
+                eprintln!();
+                eprintln!("Use --verbose to see the server body");
+            }
+        }
+        ColabError::Drive {
+            next_action, raw, ..
+        } => {
+            ui.error(&e.to_string());
+            if let Some(next) = next_action {
+                eprintln!("fix: {next}");
+            }
+            if verbose && let Some(raw) = raw {
+                eprintln!("\n{}", trim_raw(raw));
+            }
+        }
+        _ => ui.error(&e.to_string()),
+    }
+}
+
 fn error_kind(e: &ColabError) -> &'static str {
     match e {
         ColabError::NotAuthenticated => "not_authenticated",
@@ -149,6 +199,87 @@ fn error_next_action(e: &ColabError) -> Option<&'static str> {
     }
 }
 
+fn http_reason(status: u16) -> &'static str {
+    match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "HTTP error",
+    }
+}
+
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 429 | 500 | 502 | 503 | 504)
+}
+
+fn api_operation(url: &str) -> &'static str {
+    if url.contains("/assign") {
+        "runtime assignment"
+    } else if url.contains("/drive") {
+        "Drive request"
+    } else {
+        "Colab request"
+    }
+}
+
+fn api_message(status: u16, url: &str) -> &'static str {
+    if url.contains("/assign") && retryable_status(status) {
+        "Colab may be busy or the selected shape may be temporarily unavailable"
+    } else if retryable_status(status) {
+        "The service may be temporarily unavailable"
+    } else {
+        "The request was rejected by Colab"
+    }
+}
+
+fn api_fix(status: u16, url: &str) -> Option<&'static str> {
+    if url.contains("/assign") && retryable_status(status) && url.contains("shape=hm") {
+        Some("run again with Standard RAM: colab-cli session new --shape standard")
+    } else if url.contains("/assign") && retryable_status(status) {
+        Some("try again in a minute")
+    } else if status == 401 || status == 403 {
+        Some("run colab-cli auth login")
+    } else {
+        None
+    }
+}
+
+fn trim_raw(body: &str) -> String {
+    let clean = strip_html(body).replace('\n', " ");
+    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.len() > 600 {
+        format!("{}...", &clean[..600])
+    } else {
+        clean
+    }
+}
+
+fn strip_html(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut in_tag = false;
+    for ch in body.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                out.push(' ');
+            }
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+}
+
 fn interaction_allowed(cli: &Cli, stdout_tty: bool, stdin_tty: bool, ci: bool) -> bool {
     if cli.no_interactive
         || cli.json
@@ -169,130 +300,14 @@ fn interaction_allowed(cli: &Cli, stdout_tty: bool, stdin_tty: bool, ci: bool) -
 }
 
 fn handle_launcher(ui: Ui) -> Result<()> {
-    let actions = launcher_actions();
-    if !ui.interactive {
-        print_launcher(&actions, &ui);
-        return Ok(());
-    }
-
-    print_launcher(&actions, &ui);
-    print!("select [1-{} or q]: ", actions.len());
-    std::io::stdout().flush()?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    let trimmed = input.trim();
-    if trimmed.eq_ignore_ascii_case("q") || trimmed.is_empty() {
-        return Ok(());
-    }
-    let Ok(index) = trimmed.parse::<usize>() else {
-        return Err(ColabError::config(
-            "launcher selection must be a number or q",
-        ));
-    };
-    let Some(action) = actions.get(index.saturating_sub(1)) else {
-        return Err(ColabError::config("launcher selection out of range"));
-    };
-    println!();
-    println!("command preview");
-    println!("  {}", action.command);
-    println!();
-    println!("Run or edit that command in your shell.");
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-struct LauncherAction {
-    name: &'static str,
-    command: &'static str,
-    note: &'static str,
-}
-
-fn launcher_actions() -> [LauncherAction; 10] {
-    [
-        LauncherAction {
-            name: "New session",
-            command: "colab-cli session new --name work --gpu T4",
-            note: "start a runtime",
-        },
-        LauncherAction {
-            name: "Run Python",
-            command: "colab-cli run py --session - --code \"print(1)\"",
-            note: "execute one-liner",
-        },
-        LauncherAction {
-            name: "Run script",
-            command: "colab-cli run script train.py --session - -- --epochs 3",
-            note: "run a local script path on the runtime",
-        },
-        LauncherAction {
-            name: "Files / Drive",
-            command: "colab-cli fs drive status --session -",
-            note: "check storage state",
-        },
-        LauncherAction {
-            name: "Status check",
-            command: "colab-cli status check",
-            note: "local health",
-        },
-        LauncherAction {
-            name: "Slurp workflow",
-            command: "colab-cli slurp explain",
-            note: "explain slurp.toml",
-        },
-        LauncherAction {
-            name: "Fleet plan",
-            command: "colab-cli fleet plan --cost",
-            note: "plan approved runtimes only",
-        },
-        LauncherAction {
-            name: "Settings",
-            command: "colab-cli settings",
-            note: "show local preferences",
-        },
-        LauncherAction {
-            name: "Skills",
-            command: "colab-cli settings skills list",
-            note: "inspect built-in tools",
-        },
-        LauncherAction {
-            name: "Exit",
-            command: "q",
-            note: "leave launcher",
-        },
-    ]
-}
-
-fn print_launcher(actions: &[LauncherAction], ui: &Ui) {
     if ui.plain {
-        println!("cocli");
         println!("Google Colab from the terminal");
-        println!();
-        println!("Quick actions");
-        for (i, action) in actions.iter().enumerate() {
-            println!("{}. {} - {}", i + 1, action.name, action.note);
-        }
-        println!();
-        println!("Run `colab-cli --help` for commands.");
-        return;
+        println!("run: colab-cli --help");
+    } else {
+        println!("{}", "Google Colab from the terminal".bright_cyan().bold());
+        println!("run: {}", "colab-cli --help".bright_cyan());
     }
-
-    println!("{}", "cocli".bright_cyan().bold());
-    println!("{}", "Google Colab from the terminal".dimmed());
-    println!();
-    println!("{}", "Quick actions".bright_magenta().bold());
-    for (i, action) in actions.iter().enumerate() {
-        println!(
-            "  {:>2}. {:<16} {}",
-            i + 1,
-            action.name.bright_cyan(),
-            action.note.dimmed()
-        );
-    }
-    println!();
-    println!(
-        "{}",
-        "footer: ↑/↓ move  Enter select  / search  ? help  q quit".dimmed()
-    );
+    Ok(())
 }
 
 async fn run(cli: Cli, ui: Ui) -> Result<()> {
@@ -343,12 +358,16 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_status(command, &config, ui, json).await
         }
         Some(Commands::Tools { command }) => {
-            migration(&ui, "colab-cli settings skills ...");
+            migration(&ui, "colab-cli ai tools ...");
             handle_tools(command, ui, json)
         }
         Some(Commands::Fleet { command }) => handle_fleet(command, ui, json),
+        Some(Commands::Ai { command }) => handle_ai(command, ui, json),
         Some(Commands::Slurp { command }) => handle_slurp(command, ui, json),
-        Some(Commands::Agent { command }) => handle_agent(command, ui, json),
+        Some(Commands::Agent { command }) => {
+            migration(&ui, "colab-cli ai ...");
+            handle_agent(command, ui, json)
+        }
         Some(Commands::Continue { command }) => {
             let config = ColabConfig::load(cli.quiet)?;
             handle_continue(command, &config, ui, json).await
@@ -412,8 +431,12 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             ui.success("Signed out. Credentials cleared.");
             Ok(())
         }
-        AuthCommands::Add(args) => handle_auth_add(args, ui),
+        AuthCommands::Add(args) => {
+            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            handle_auth_add(args, ui)
+        }
         AuthCommands::List { show_private } => {
+            require_experiment(|cfg| cfg.experiments.multi_login)?;
             let store = load_auth_profiles()?;
             let out: Vec<_> = store
                 .profiles
@@ -426,6 +449,7 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             )
         }
         AuthCommands::Status { name, show_private } => {
+            require_experiment(|cfg| cfg.experiments.multi_login)?;
             let store = load_auth_profiles()?;
             let profile = store
                 .get(&name)
@@ -436,6 +460,7 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             name,
             allow_fallback_account,
         } => {
+            require_experiment(|cfg| cfg.experiments.multi_login)?;
             let mut store = load_auth_profiles()?;
             let profile = store
                 .get(&name)
@@ -458,6 +483,7 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             Ok(())
         }
         AuthCommands::Remove { name } => {
+            require_experiment(|cfg| cfg.experiments.multi_login)?;
             let mut store = load_auth_profiles()?;
             if !store.remove(&name) {
                 return Err(ColabError::config(format!(
@@ -480,6 +506,7 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             print_value(json, &data)
         }
         AuthCommands::ExportRedacted { show_private } => {
+            require_experiment(|cfg| cfg.experiments.multi_login)?;
             let store = load_auth_profiles()?;
             let mut value = serde_json::to_value(&store)?;
             if !show_private
@@ -503,6 +530,7 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             Ok(())
         }
         AuthCommands::Limits { name } => {
+            require_experiment(|cfg| cfg.experiments.multi_login)?;
             let store = load_auth_profiles()?;
             let profile = store
                 .get(&name)
@@ -547,14 +575,19 @@ async fn handle_session(cmd: Option<SessionCommands>, config: &ColabConfig, ui: 
         None => handle_session_menu(config, ui).await,
         Some(SessionCommands::New(args)) => {
             let (variant, accelerator) = session_accelerator(&args)?;
+            let shape = shape_from_args(&args)?;
+            let retries = session_retries(&args);
             handle_assign(
                 config,
                 ui,
-                Some(variant),
-                accelerator,
-                args.name,
-                shape_from(args.high_ram),
-                args.keepalive,
+                AssignOptions {
+                    variant: Some(variant),
+                    accelerator,
+                    name: args.name,
+                    shape,
+                    keepalive: args.keepalive,
+                    retries,
+                },
             )
             .await
         }
@@ -587,6 +620,8 @@ async fn handle_session_menu(config: &ColabConfig, ui: Ui) -> Result<()> {
         ("New session", "Assign a Colab runtime"),
         ("List sessions", "Show local assigned runtimes"),
         ("Last session", "Inspect the latest runtime"),
+        ("Open session URL", "Print the latest runtime URL"),
+        ("Stop session", "Stop the latest runtime"),
         ("Close", "Return to shell"),
     ];
     if ui.interactive {
@@ -597,7 +632,21 @@ async fn handle_session_menu(config: &ColabConfig, ui: Ui) -> Result<()> {
             .interact_opt()
             .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
         return match choice {
-            Some(0) => handle_assign(config, ui, None, None, None, Shape::Standard, false).await,
+            Some(0) => {
+                handle_assign(
+                    config,
+                    ui,
+                    AssignOptions {
+                        variant: None,
+                        accelerator: None,
+                        name: None,
+                        shape: Shape::Standard,
+                        keepalive: false,
+                        retries: 3,
+                    },
+                )
+                .await
+            }
             Some(1) => handle_ls(config, ui).await,
             Some(2) => {
                 let manager = make_manager(config)?;
@@ -611,6 +660,8 @@ async fn handle_session_menu(config: &ColabConfig, ui: Ui) -> Result<()> {
                 ui.print_server_status(last);
                 Ok(())
             }
+            Some(3) => handle_url(config, ui, None, false).await,
+            Some(4) => handle_rm(config, ui, None).await,
             _ => Ok(()),
         };
     }
@@ -618,13 +669,9 @@ async fn handle_session_menu(config: &ColabConfig, ui: Ui) -> Result<()> {
     println!("Session");
     println!("Manage Colab sessions");
     println!();
-    for (name, note) in actions.iter().take(3) {
-        println!("  {:<14} {}", name, note);
+    for (name, note) in actions.iter().take(5) {
+        println!("  {:<17} {}", name, note);
     }
-    println!();
-    println!("Next");
-    println!("  colab-cli session list");
-    println!("  colab-cli session new --name work");
     Ok(())
 }
 
@@ -937,15 +984,18 @@ async fn drive_mount(
     timeout_secs: u64,
     open: bool,
 ) -> Result<()> {
-    let status = drive_status(config, ui, session.clone(), &path).await?;
-    if status.mounted == Some(true) {
-        return print_drive_mount_success(json, &path, "Drive already mounted");
-    }
-
+    drive_progress(&ui, "Drive mount");
+    drive_stage(&ui, "checking session");
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
     let server = resolve_server(&servers, session.as_deref())?;
     let server = ensure_fresh_token(&manager, server, &ui).await?;
+
+    drive_stage(&ui, "checking existing Drive mount");
+    let status = drive_status_for_server(manager.client(), &server, &path).await?;
+    if status.mounted == Some(true) {
+        return print_drive_mount_success(json, &path, "Drive already mounted");
+    }
 
     if open {
         let url = crate::cocli::runtime::session_url(&config.colab_domain, &server.endpoint)
@@ -955,8 +1005,10 @@ async fn drive_mount(
     }
 
     let timeout = std::time::Duration::from_secs(timeout_secs.max(1));
+    drive_stage(&ui, "checking kernel context");
     preflight_drive_kernel(manager.client(), &server, timeout).await?;
 
+    drive_stage(&ui, "requesting Drive mount");
     let output =
         runner::execute_colab_cell(manager.client(), &server, &drive_mount_cell(&path), timeout)
             .await?;
@@ -966,7 +1018,8 @@ async fn drive_mount(
         return Err(drive_approval_required(Some(output.raw_text())));
     }
 
-    let after = drive_status(config, ui, session, &path).await?;
+    drive_stage(&ui, "verifying /content/drive");
+    let after = drive_status_for_server(manager.client(), &server, &path).await?;
     if after.mounted == Some(true) || drive_mount_output_looks_ok(&output.raw_text()) {
         print_drive_mount_success(json, &path, "Drive mounted")
     } else {
@@ -976,6 +1029,18 @@ async fn drive_mount(
             Some("colab-cli fs drive status"),
             Some(output.raw_text()),
         ))
+    }
+}
+
+fn drive_progress(ui: &Ui, title: &str) {
+    if ui.interactive && !ui.quiet {
+        println!("{title}");
+    }
+}
+
+fn drive_stage(ui: &Ui, label: &str) {
+    if ui.interactive && !ui.quiet {
+        println!("· {label}");
     }
 }
 
@@ -1038,23 +1103,28 @@ async fn drive_status(
     let servers = manager.list_local()?;
     let server = resolve_server(&servers, session.as_deref())?;
     let server = ensure_fresh_token(&manager, server, &ui).await?;
-    let out = match runner::capture_remote_command(
-        manager.client(),
-        &server,
-        &drive_status_probe_command(path),
-    )
-    .await
-    {
-        Ok(out) => out,
-        Err(_) => {
-            return Ok(DriveStatus {
-                ok: false,
-                mounted: None,
-                path: path.to_string(),
-                next_action: Some("colab-cli status check".to_string()),
-            });
-        }
-    };
+    drive_status_for_server(manager.client(), &server, path).await
+}
+
+async fn drive_status_for_server(
+    client: &ColabClient,
+    server: &StoredServer,
+    path: &str,
+) -> Result<DriveStatus> {
+    let out =
+        match runner::capture_remote_command(client, server, &drive_status_probe_command(path))
+            .await
+        {
+            Ok(out) => out,
+            Err(_) => {
+                return Ok(DriveStatus {
+                    ok: false,
+                    mounted: None,
+                    path: path.to_string(),
+                    next_action: Some("colab-cli status check".to_string()),
+                });
+            }
+        };
     Ok(parse_drive_status(&out, path))
 }
 
@@ -1095,13 +1165,13 @@ fn print_drive_status(status: &DriveStatus, json: bool, ui: Ui) -> Result<()> {
         Some(false) => {
             println!("Drive is not mounted");
             if let Some(next) = &status.next_action {
-                println!("next: {next}");
+                println!("fix: {next}");
             }
         }
         None => {
             println!("Could not confirm Drive status");
             if let Some(next) = &status.next_action {
-                println!("next: {next}");
+                println!("fix: {next}");
             }
         }
     }
@@ -1232,7 +1302,7 @@ fn drive_approval_required(raw: Option<String>) -> ColabError {
     ColabError::drive(
         "drive_browser_approval_required",
         "Drive needs browser approval",
-        Some("colab-cli session url --open"),
+        Some("open the session once, then run fs drive mount again: colab-cli session url --open"),
         raw,
     )
 }
@@ -1433,6 +1503,18 @@ async fn handle_status(
             }),
         ),
         Some(StatusCommands::Fleet { config }) => {
+            let cfg = load_cocli_config().unwrap_or_default();
+            if !cfg.experiments.fleet {
+                return print_value_or_kv(
+                    json,
+                    "fleet",
+                    &serde_json::json!({
+                        "enabled": false,
+                        "experimental": true,
+                        "fix": "colab-cli settings experiments"
+                    }),
+                );
+            }
             if Path::new(&config).exists() {
                 handle_fleet(
                     FleetCommands::Plan(FleetConfigArgs {
@@ -1489,7 +1571,7 @@ async fn handle_status(
 struct StatusReport {
     title: String,
     sections: Vec<StatusLine>,
-    next_actions: Vec<String>,
+    fix: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1505,22 +1587,17 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
     let has_session = !sessions.is_empty();
     let files_ready = cache_writable(&config.data_dir);
 
-    let mut next_actions = Vec::new();
-    if account.is_none() {
-        next_actions.push("colab-cli auth login".to_string());
-    }
-    if !has_session {
-        next_actions.push("colab-cli session list".to_string());
-        next_actions.push("colab-cli session new --name work".to_string());
+    let cfg = load_cocli_config().unwrap_or_default();
+    let slurp_exists = Path::new("slurp.toml").exists();
+    let fix = if account.is_none() {
+        Some("run colab-cli auth login".to_string())
+    } else if !has_session {
+        Some("run colab-cli session list".to_string())
+    } else if !files_ready {
+        Some("check local data directory permissions".to_string())
     } else {
-        let name = latest_server(&sessions)
-            .map(|s| s.label.as_str())
-            .unwrap_or("work");
-        next_actions.push(format!(
-            "colab-cli run py --code \"print('hello')\" --session \"{name}\""
-        ));
-        next_actions.push("colab-cli status runtime --all".to_string());
-    }
+        None
+    };
 
     Ok(StatusReport {
         title: "cocli status".to_string(),
@@ -1540,8 +1617,8 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
                 message: sessions
                     .iter()
                     .max_by_key(|s| s.date_assigned)
-                    .map(|s| format!("active: {}", s.label))
-                    .unwrap_or_else(|| "no active session".to_string()),
+                    .map(|s| format!("selected: {}", s.label))
+                    .unwrap_or_else(|| "none selected".to_string()),
             },
             StatusLine {
                 name: "Runtime",
@@ -1564,10 +1641,32 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
             StatusLine {
                 name: "Drive",
                 state: "idle",
-                message: "run fs drive status after choosing a session".to_string(),
+                message: "not checked".to_string(),
+            },
+            StatusLine {
+                name: "Slurp",
+                state: if slurp_exists { "ready" } else { "idle" },
+                message: if slurp_exists {
+                    "config found".to_string()
+                } else {
+                    "no config".to_string()
+                },
+            },
+            StatusLine {
+                name: "Fleet",
+                state: if cfg.experiments.fleet {
+                    "info"
+                } else {
+                    "idle"
+                },
+                message: if cfg.experiments.fleet {
+                    "experimental on".to_string()
+                } else {
+                    "off experimental".to_string()
+                },
             },
         ],
-        next_actions,
+        fix,
     })
 }
 
@@ -1588,6 +1687,20 @@ fn render_status_report(report: &StatusReport, json: bool, ui: Ui) -> Result<()>
     if json {
         return print_value(true, report);
     }
+    if ui.quiet {
+        for section in &report.sections {
+            println!(
+                "{}\t{}\t{}",
+                section.name.to_ascii_lowercase(),
+                section.state,
+                section.message
+            );
+        }
+        if let Some(fix) = &report.fix {
+            println!("fix\t{fix}");
+        }
+        return Ok(());
+    }
     println!("{}", heading(&report.title, ui));
     println!("{}", rule(ui));
     println!();
@@ -1600,12 +1713,9 @@ fn render_status_report(report: &StatusReport, json: bool, ui: Ui) -> Result<()>
             human_message(&section.message, ui)
         );
     }
-    if !report.next_actions.is_empty() {
+    if let Some(fix) = &report.fix {
         println!();
-        println!("{}", heading("Next", ui));
-        for action in &report.next_actions {
-            println!("  {}", command_text(action, ui));
-        }
+        println!("fix: {}", command_text(fix, ui));
     }
     Ok(())
 }
@@ -1767,10 +1877,13 @@ fn handle_settings(cmd: Option<SettingsCommands>, ui: Ui, json: bool) -> Result<
         }
         Some(SettingsCommands::Skills { command }) => handle_skills(command, ui, json),
         Some(SettingsCommands::Ui { command }) => handle_settings_ui(command, ui, json),
+        Some(SettingsCommands::Experiments { command }) => {
+            handle_settings_experiments(command, ui, json)
+        }
         Some(SettingsCommands::Support { command }) => handle_settings_support(command, json),
-        #[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+        #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
         Some(SettingsCommands::Dev { command }) => {
-            if !maintainer_allowed() {
+            if !dev_tools_unlocked()? {
                 return Err(ColabError::config("private maintainer command"));
             }
             match command {
@@ -1789,7 +1902,8 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
     let rows = [
         ("General", "config path, profiles, defaults"),
         ("UI", "colour, theme, animations, bell, fun"),
-        ("Skills", "agent/tool catalog"),
+        ("Experiments", "disabled optional features"),
+        ("AI", "agent and tool workflows"),
         ("Support", "redacted bug reports and bundles"),
         ("Dev", "maintainer-only tools, hidden by default"),
     ];
@@ -1797,7 +1911,7 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
     if ui.interactive {
         let choices: Vec<_> = rows
             .iter()
-            .filter(|(name, _)| *name != "Dev" || maintainer_allowed())
+            .filter(|(name, _)| *name != "Dev" || dev_visible(&cfg))
             .map(|(name, note)| format!("{name} - {note}"))
             .collect();
         let choice = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
@@ -1808,20 +1922,9 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
             .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
         return match choice {
             Some(1) => handle_settings_ui(None, ui, json),
-            Some(2) => handle_skills(
-                SkillCommands::List {
-                    json: false,
-                    category: None,
-                    scope: None,
-                    risk: None,
-                    needs_session: false,
-                    enabled: false,
-                    disabled: false,
-                },
-                ui,
-                json,
-            ),
-            Some(3) => {
+            Some(2) => handle_settings_experiments(None, ui, json),
+            Some(3) => handle_ai(Some(AiCommands::Tools { command: None }), ui, json),
+            Some(4) => {
                 println!("Support");
                 println!("  bug reports     redacted by default");
                 println!("  bundle          colab-cli settings support bundle");
@@ -1840,16 +1943,15 @@ fn print_settings_menu(
     rows: &[(&str, &str)],
 ) -> Result<()> {
     println!("{}", heading("Settings", ui));
-    println!("Config, UI, skills, and support");
+    println!("Config, UI, experiments, support");
     println!();
-    for (index, (name, note)) in rows.iter().enumerate() {
+    for (index, (name, note)) in rows
+        .iter()
+        .filter(|(name, _)| *name != "Dev" || dev_visible(cfg))
+        .enumerate()
+    {
         let marker = if index == 0 { "›" } else { " " };
-        let visible = if *name == "Dev" && !maintainer_allowed() {
-            "hidden"
-        } else {
-            note
-        };
-        println!("{marker} {:<14} {}", name, muted(visible, ui));
+        println!("{marker} {:<14} {}", name, muted(note, ui));
     }
     println!();
     println!("Config path");
@@ -1861,24 +1963,23 @@ fn print_settings_menu(
     println!("  animations      {}", on_off(cfg.ui.animations));
     println!("  tui             {}", cfg.ui.tui);
     println!("  bell            {}", on_off(cfg.ui.bell));
-    println!("  skills          {}", on_off(cfg.skills.enabled));
-    println!();
-    println!(
-        "{}",
-        muted("enter open · esc close · ↑/↓ move · / search", ui)
-    );
+    println!("  experiments     {}", experiments_summary(cfg));
     Ok(())
 }
 
 fn handle_config_get_key(key: &str, json: bool) -> Result<()> {
-    let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
-    let cfg = config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+    let cfg = load_cocli_config()?;
     let value = serde_json::to_value(&cfg)?;
     let selected = key
         .split('.')
         .try_fold(&value, |current, part| current.get(part))
         .ok_or_else(|| ColabError::config(format!("unknown settings key: {key}")))?;
     print_value(json, selected)
+}
+
+fn load_cocli_config() -> Result<config::CocliConfig> {
+    let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
+    config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))
 }
 
 fn handle_settings_ui(command: Option<SettingsUiCommands>, ui: Ui, json: bool) -> Result<()> {
@@ -1907,6 +2008,15 @@ fn handle_settings_ui(command: Option<SettingsUiCommands>, ui: Ui, json: bool) -
                 json,
             )
         }
+        Some(SettingsUiCommands::Reset) => {
+            let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
+            let mut cfg =
+                config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+            cfg.ui = config::UiConfig::default();
+            cfg.save(&path)
+                .map_err(|e| ColabError::config(e.to_string()))?;
+            Ok(())
+        }
         Some(SettingsUiCommands::Preview) => {
             if json {
                 print_value(
@@ -1930,6 +2040,148 @@ fn handle_settings_ui(command: Option<SettingsUiCommands>, ui: Ui, json: bool) -
                 Ok(())
             }
         }
+    }
+}
+
+fn handle_settings_experiments(
+    command: Option<SettingsExperimentsCommands>,
+    ui: Ui,
+    json: bool,
+) -> Result<()> {
+    match command {
+        None => render_experiments(ui, json),
+        Some(SettingsExperimentsCommands::Get { key: None }) => {
+            let cfg = load_cocli_config()?;
+            print_value(json, &cfg.experiments)
+        }
+        Some(SettingsExperimentsCommands::Get { key: Some(key) }) => handle_config_get_key(
+            &format!("experiments.{}", normalize_experiment_key(&key)),
+            json,
+        ),
+        Some(SettingsExperimentsCommands::Set { key, value }) => handle_config(
+            ConfigCommands::Set {
+                key: format!("experiments.{}", normalize_experiment_key(&key)),
+                value,
+            },
+            json,
+        ),
+        Some(SettingsExperimentsCommands::Reset) => {
+            let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
+            let mut cfg =
+                config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+            cfg.experiments = config::ExperimentsConfig::default();
+            cfg.save(&path)
+                .map_err(|e| ColabError::config(e.to_string()))?;
+            Ok(())
+        }
+    }
+}
+
+fn render_experiments(ui: Ui, json: bool) -> Result<()> {
+    let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
+    let mut cfg =
+        config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+    if json {
+        return print_value(true, &cfg.experiments);
+    }
+
+    let items = experiment_items(&cfg);
+    if ui.interactive {
+        let labels: Vec<_> = items
+            .iter()
+            .map(|item| format!("{} - {}", item.label, item.risk))
+            .collect();
+        let defaults: Vec<_> = items.iter().map(|item| item.enabled).collect();
+        let selected =
+            dialoguer::MultiSelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                .with_prompt("Experiments")
+                .items(&labels)
+                .defaults(&defaults)
+                .interact_opt()
+                .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
+        if let Some(selected) = selected {
+            cfg.experiments.multi_login = selected.contains(&0);
+            cfg.experiments.fleet = selected.contains(&1);
+            cfg.experiments.mcp_server = selected.contains(&2);
+            cfg.experiments.ai_plan_runner = selected.contains(&3);
+            cfg.experiments.slurp_automation = selected.contains(&4);
+            cfg.experiments.background_live_checks = selected.contains(&5);
+            cfg.save(&path)
+                .map_err(|e| ColabError::config(e.to_string()))?;
+        }
+    }
+
+    println!("{}", heading("Experiments", ui));
+    println!("Optional features are off by default");
+    println!();
+    println!("Config path");
+    println!("  {}", path_text(&path.display().to_string(), ui));
+    println!();
+    for item in experiment_items(&cfg) {
+        println!(
+            "[{}] {:<28} {}",
+            if item.enabled { "x" } else { " " },
+            item.label,
+            muted(item.risk, ui)
+        );
+    }
+    Ok(())
+}
+
+struct ExperimentItem {
+    label: &'static str,
+    risk: &'static str,
+    enabled: bool,
+}
+
+fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 6] {
+    [
+        ExperimentItem {
+            label: "Multi-login",
+            risk: "multiple profiles; never bypasses limits",
+            enabled: cfg.experiments.multi_login,
+        },
+        ExperimentItem {
+            label: "Fleet/distributed planning",
+            risk: "planning only; no quota bypass",
+            enabled: cfg.experiments.fleet,
+        },
+        ExperimentItem {
+            label: "MCP server",
+            risk: "stdio tool surface",
+            enabled: cfg.experiments.mcp_server,
+        },
+        ExperimentItem {
+            label: "AI plan runner",
+            risk: "requires explicit plan and confirmation",
+            enabled: cfg.experiments.ai_plan_runner,
+        },
+        ExperimentItem {
+            label: "Slurp automation",
+            risk: "workflow execution after review",
+            enabled: cfg.experiments.slurp_automation,
+        },
+        ExperimentItem {
+            label: "Background live checks",
+            risk: "may touch network",
+            enabled: cfg.experiments.background_live_checks,
+        },
+    ]
+}
+
+fn normalize_experiment_key(key: &str) -> String {
+    key.replace('-', "_")
+}
+
+fn experiments_summary(cfg: &config::CocliConfig) -> String {
+    let enabled = experiment_items(cfg)
+        .into_iter()
+        .filter(|item| item.enabled)
+        .count();
+    if enabled == 0 {
+        "all off".to_string()
+    } else {
+        format!("{enabled} enabled")
     }
 }
 
@@ -2100,6 +2352,16 @@ fn maintainer_allowed() -> bool {
     git_identity_is_maintainer()
 }
 
+fn dev_visible(cfg: &config::CocliConfig) -> bool {
+    maintainer_allowed() && (cfg.dev.enabled || std::env::var_os("COLAB_CLI_DEV").is_some())
+}
+
+#[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
+fn dev_tools_unlocked() -> Result<bool> {
+    let cfg = load_cocli_config()?;
+    Ok(dev_visible(&cfg))
+}
+
 fn git_identity_is_maintainer() -> bool {
     let email = Command::new("git")
         .args(["config", "user.email"])
@@ -2131,27 +2393,12 @@ fn handle_skills(cmd: SkillCommands, ui: Ui, json: bool) -> Result<()> {
             if json || local_json {
                 print_value(true, &rows)
             } else {
-                println!("{}", heading("Skills", ui));
-                println!("Agent-friendly tools and optional integrations");
-                println!();
-                println!(
-                    "{:<18} {:<10} {:<8} {:<9} {:<9} Summary",
-                    "Skill", "Scope", "Risk", "Session", "Network"
-                );
-                for row in rows {
-                    println!(
-                        "{:<18} {:<10} {:<8} {:<9} {:<9} {}",
-                        row.name,
-                        row.scope,
-                        row.risk,
-                        yes_no(row.needs_session),
-                        yes_no(row.network),
-                        row.summary
-                    );
-                }
-                println!();
-                println!("{}", muted("enter inspect · / search · esc close", ui));
-                Ok(())
+                print_skill_catalog(
+                    "Skills",
+                    "Agent-friendly tools and optional integrations",
+                    &rows,
+                    ui,
+                )
             }
         }
         SkillCommands::Inspect {
@@ -2208,6 +2455,27 @@ fn handle_skills(cmd: SkillCommands, ui: Ui, json: bool) -> Result<()> {
             print_value(json, &data)
         }
     }
+}
+
+fn print_skill_catalog(title: &str, subtitle: &str, rows: &[SkillRow], ui: Ui) -> Result<()> {
+    println!("{}", heading(title, ui));
+    println!("{subtitle}");
+    println!();
+    println!(
+        "{:<18} {:<8} {:<15} {:<9} Summary",
+        "Tool", "Risk", "Needs session", "Network"
+    );
+    for row in rows {
+        println!(
+            "{:<18} {:<8} {:<15} {:<9} {}",
+            row.name,
+            row.risk,
+            yes_no(row.needs_session),
+            yes_no(row.network),
+            row.summary
+        );
+    }
+    Ok(())
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -2473,6 +2741,7 @@ fn muted(text: &str, ui: Ui) -> String {
 }
 
 fn handle_fleet(cmd: FleetCommands, ui: Ui, json: bool) -> Result<()> {
+    require_experiment(|cfg| cfg.experiments.fleet)?;
     match cmd {
         FleetCommands::Plan(args) => {
             let (cfg, plan, findings) = fleet_plan_from_args(&args)?;
@@ -2536,6 +2805,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
         }
         SlurpCommands::Plan(args) => handle_fleet(FleetCommands::Plan(args), ui, json),
         SlurpCommands::Run(args) | SlurpCommands::Resume(args) => {
+            require_experiment(|cfg| cfg.experiments.slurp_automation)?;
             handle_fleet(FleetCommands::Exec(args), ui, json)
         }
         SlurpCommands::Explain(args) => {
@@ -2572,7 +2842,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
     }
 }
 
-#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+#[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 fn handle_release(cmd: ReleaseCommands, json: bool) -> Result<()> {
     match cmd {
         ReleaseCommands::Name { version } => {
@@ -2668,6 +2938,119 @@ fn handle_agent(cmd: AgentCommands, ui: Ui, json: bool) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn handle_ai(cmd: Option<AiCommands>, ui: Ui, json: bool) -> Result<()> {
+    match cmd {
+        None => {
+            println!("{}", heading("AI", ui));
+            println!("Agent, MCP, and tool workflows");
+            println!();
+            println!("  tools       list and inspect agent-friendly tools");
+            println!("  plan        draft an inspectable plan");
+            println!("  audit       check a saved plan");
+            println!("  mcp         disabled unless enabled in experiments");
+            Ok(())
+        }
+        Some(AiCommands::Tools { command }) => handle_ai_tools(command, ui, json),
+        Some(AiCommands::Mcp { command }) => handle_ai_mcp(command, json),
+        Some(AiCommands::Plan { goal, out }) => {
+            let plan = format!(
+                "goal = {goal:?}\nconfirm_required = true\n\n[[steps]]\ntool = \"ai.audit\"\ninput = {{}}\n"
+            );
+            if let Some(out) = out {
+                std::fs::write(&out, plan)?;
+                ui.success(&format!("plan written: {out}"));
+            } else {
+                print!("{plan}");
+            }
+            Ok(())
+        }
+        Some(AiCommands::Audit { plan_file }) => {
+            let body = std::fs::read_to_string(&plan_file)?;
+            print_value(
+                json,
+                &serde_json::json!({
+                    "plan": plan_file,
+                    "bytes": body.len(),
+                    "confirm_required": !body.contains("confirm_required = false"),
+                }),
+            )
+        }
+        Some(AiCommands::Explain { plan_file }) => {
+            let body = std::fs::read_to_string(&plan_file)?;
+            if json {
+                print_value(
+                    true,
+                    &serde_json::json!({ "plan": plan_file, "text": body }),
+                )
+            } else {
+                println!("{}", heading("AI plan", ui));
+                println!("{}", body.trim());
+                Ok(())
+            }
+        }
+        Some(AiCommands::Run { plan_file, confirm }) => {
+            require_experiment(|cfg| cfg.experiments.ai_plan_runner)?;
+            if !confirm {
+                return Err(experiment_error("ai run requires --confirm"));
+            }
+            let body = std::fs::read_to_string(&plan_file)?;
+            append_audit(&format!("ai_run plan={plan_file} bytes={}", body.len()))?;
+            ui.success("AI plan accepted for confirmed execution audit");
+            Ok(())
+        }
+    }
+}
+
+fn handle_ai_tools(cmd: Option<AiToolsCommands>, ui: Ui, json: bool) -> Result<()> {
+    match cmd.unwrap_or(AiToolsCommands::List { json: false }) {
+        AiToolsCommands::List { json: local_json } => {
+            let rows = skill_rows(None, None, false);
+            if json || local_json {
+                print_value(true, &rows)
+            } else {
+                print_skill_catalog("AI tools", "Agent-friendly workflows", &rows, ui)
+            }
+        }
+        AiToolsCommands::Inspect {
+            name,
+            json: local_json,
+        } => handle_skills(
+            SkillCommands::Inspect {
+                name,
+                json: local_json,
+            },
+            ui,
+            json,
+        ),
+    }
+}
+
+fn handle_ai_mcp(cmd: Option<AiMcpCommands>, json: bool) -> Result<()> {
+    require_experiment(|cfg| cfg.experiments.mcp_server)?;
+    match cmd.unwrap_or(AiMcpCommands::Tools) {
+        AiMcpCommands::Tools => {
+            let rows = skill_rows(None, None, false);
+            print_value(json, &serde_json::json!({ "tools": rows }))
+        }
+        AiMcpCommands::Serve { stdio: _ } => {
+            Err(ColabError::config("MCP server not implemented yet"))
+        }
+    }
+}
+
+fn require_experiment(enabled: impl FnOnce(&config::CocliConfig) -> bool) -> Result<()> {
+    let cfg = load_cocli_config()?;
+    if enabled(&cfg) {
+        Ok(())
+    } else {
+        Err(experiment_error("experimental feature disabled"))
+    }
+}
+
+fn experiment_error(message: &str) -> ColabError {
+    ColabError::config(format!("{message}\nenable: colab-cli settings experiments"))
 }
 
 async fn handle_continue(
@@ -2779,15 +3162,18 @@ async fn handle_continue(
                 handle_assign(
                     config,
                     ui,
-                    Some(if gpu.is_some() {
-                        Variant::Gpu
-                    } else {
-                        Variant::Cpu
-                    }),
-                    gpu,
-                    Some(manifest.session.name.clone()),
-                    Shape::Standard,
-                    false,
+                    AssignOptions {
+                        variant: Some(if gpu.is_some() {
+                            Variant::Gpu
+                        } else {
+                            Variant::Cpu
+                        }),
+                        accelerator: gpu,
+                        name: Some(manifest.session.name.clone()),
+                        shape: Shape::Standard,
+                        keepalive: false,
+                        retries: 1,
+                    },
                 )
                 .await?;
             }
@@ -2866,10 +3252,22 @@ fn handle_config(cmd: ConfigCommands, json: bool) -> Result<()> {
                 "support.redact_paths" => cfg.support.redact_paths = parse_bool(&value)?,
                 "support.redact_emails" => cfg.support.redact_emails = parse_bool(&value)?,
                 "support.redact_tokens" => cfg.support.redact_tokens = parse_bool(&value)?,
+                "experiments.multi_login" => cfg.experiments.multi_login = parse_bool(&value)?,
+                "experiments.fleet" => cfg.experiments.fleet = parse_bool(&value)?,
+                "experiments.mcp_server" => cfg.experiments.mcp_server = parse_bool(&value)?,
+                "experiments.ai_plan_runner" => {
+                    cfg.experiments.ai_plan_runner = parse_bool(&value)?;
+                }
+                "experiments.slurp_automation" => {
+                    cfg.experiments.slurp_automation = parse_bool(&value)?;
+                }
+                "experiments.background_live_checks" => {
+                    cfg.experiments.background_live_checks = parse_bool(&value)?;
+                }
                 "dev.enabled" => cfg.dev.enabled = parse_bool(&value)?,
                 _ => {
                     return Err(ColabError::config(
-                        "supported settings keys include ui.theme, ui.color, ui.animations, ui.tui, ui.bell, ui.fun, ui.icons, output.json, skills.enabled, support.redact_tokens, and dev.enabled",
+                        "supported settings keys include ui.theme, ui.color, ui.animations, ui.tui, ui.bell, ui.fun, ui.icons, output.json, skills.enabled, support.redact_tokens, experiments.fleet, experiments.mcp_server, experiments.ai_plan_runner, and dev.enabled",
                     ));
                 }
             }
@@ -3035,6 +3433,25 @@ fn session_accelerator(args: &SessionNewArgs) -> Result<(Variant, Option<String>
         (Some(gpu), None) => Ok((Variant::Gpu, Some(gpu.clone()))),
         (None, Some(tpu)) => Ok((Variant::Tpu, Some(tpu.clone()))),
         (None, None) => Ok((Variant::Cpu, None)),
+    }
+}
+
+fn shape_from_args(args: &SessionNewArgs) -> Result<Shape> {
+    match (args.shape.as_deref(), args.high_ram) {
+        (Some("standard"), false) | (None, false) => Ok(Shape::Standard),
+        (Some("high-ram"), _) | (None, true) => Ok(Shape::HighMem),
+        (Some("standard"), true) => Err(ColabError::config(
+            "choose --shape standard or --high-ram, not both",
+        )),
+        _ => Err(ColabError::config("shape must be standard or high-ram")),
+    }
+}
+
+fn session_retries(args: &SessionNewArgs) -> u8 {
+    if args.no_retry {
+        1
+    } else {
+        args.retries.clamp(1, 10)
     }
 }
 
@@ -3328,11 +3745,14 @@ async fn handle_server(cmd: ServerCommands, config: &ColabConfig, ui: Ui) -> Res
             handle_assign(
                 config,
                 ui,
-                variant,
-                accelerator,
-                name,
-                shape_from(high_ram),
-                keepalive,
+                AssignOptions {
+                    variant,
+                    accelerator,
+                    name,
+                    shape: shape_from(high_ram),
+                    keepalive,
+                    retries: 1,
+                },
             )
             .await
         }
@@ -3398,37 +3818,52 @@ fn shape_from(high_ram: bool) -> Shape {
     }
 }
 
-async fn handle_assign(
-    config: &ColabConfig,
-    ui: Ui,
-    cli_variant: Option<Variant>,
-    cli_accelerator: Option<String>,
-    cli_name: Option<String>,
-    cli_shape: Shape,
+struct AssignOptions {
+    variant: Option<Variant>,
+    accelerator: Option<String>,
+    name: Option<String>,
+    shape: Shape,
     keepalive: bool,
-) -> Result<()> {
+    retries: u8,
+}
+
+struct AssignRequest {
+    label: String,
+    variant: Variant,
+    accelerator: Option<String>,
+    shape: Shape,
+    retries: u8,
+}
+
+async fn handle_assign(config: &ColabConfig, ui: Ui, options: AssignOptions) -> Result<()> {
     let manager = make_manager(config)?;
     let client = manager.client();
 
     let ccu = client.get_ccu_info().await.ok();
     let servers = manager.list_local()?;
 
-    let fully_specified = cli_variant.is_some() && cli_name.is_some();
+    let fully_specified = options.variant.is_some() && options.name.is_some();
 
     if fully_specified || ui.quiet {
-        let variant = cli_variant.unwrap_or(Variant::Cpu);
-        let label = cli_name.unwrap_or_else(|| default_label(variant, cli_accelerator.as_deref()));
+        let variant = options.variant.unwrap_or(Variant::Cpu);
+        let accelerator = options.accelerator;
+        let label = options
+            .name
+            .unwrap_or_else(|| default_label(variant, accelerator.as_deref()));
         let server = do_assign(
             &manager,
             &ui,
             &ccu,
-            label,
-            variant,
-            cli_accelerator,
-            cli_shape,
+            AssignRequest {
+                label,
+                variant,
+                accelerator,
+                shape: options.shape,
+                retries: options.retries,
+            },
         )
         .await?;
-        if keepalive {
+        if options.keepalive {
             return run_keepalive_loop(config, ui, server).await;
         }
         return Ok(());
@@ -3456,7 +3891,7 @@ async fn handle_assign(
         };
         ui.success(&format!("Connected to '{}'", server.label));
         ui.print_server_status(&server);
-        if keepalive {
+        if options.keepalive {
             return run_keepalive_loop(config, ui, server).await;
         }
         return Ok(());
@@ -3488,7 +3923,7 @@ async fn handle_assign(
     let shape_idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
         .with_prompt("Machine shape")
         .items(&shape_choices)
-        .default(if matches!(cli_shape, Shape::HighMem) {
+        .default(if matches!(options.shape, Shape::HighMem) {
             1
         } else {
             0
@@ -3508,8 +3943,20 @@ async fn handle_assign(
         .interact_text()
         .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
 
-    let server = do_assign(&manager, &ui, &ccu, label, variant, accelerator, shape).await?;
-    if keepalive {
+    let server = do_assign(
+        &manager,
+        &ui,
+        &ccu,
+        AssignRequest {
+            label,
+            variant,
+            accelerator,
+            shape,
+            retries: options.retries,
+        },
+    )
+    .await?;
+    if options.keepalive {
         return run_keepalive_loop(config, ui, server).await;
     }
     Ok(())
@@ -3519,10 +3966,7 @@ async fn do_assign(
     manager: &ServerManager,
     ui: &Ui,
     ccu: &Option<crate::cocli::session::model::CcuInfo>,
-    label: String,
-    variant: Variant,
-    accelerator: Option<String>,
-    shape: Shape,
+    request: AssignRequest,
 ) -> Result<StoredServer> {
     if let Some(info) = ccu {
         println!();
@@ -3537,57 +3981,66 @@ async fn do_assign(
         println!();
     }
 
-    let pb = ui.spinner(&format!(
-        "Assigning {} server ({})\u{2026}",
-        variant.display_name(),
-        shape.display_name()
-    ));
-    match manager.assign(label, variant, accelerator, shape).await {
-        Ok(outcome) => {
-            Ui::spinner_done(pb, "Assigned");
-            println!();
-            ui.success("runtime warmed up");
-            if outcome.shape_mismatch {
-                ui.warn(&format!(
-                    "Requested {} but Colab provisioned {}. Your account tier may not allow {} shape.",
-                    outcome.requested_shape,
-                    outcome.reported_shape.unwrap_or(Shape::Standard),
-                    outcome.requested_shape,
-                ));
-            }
-            ui.print_server_status(&outcome.server);
-            if !ui.quiet {
+    let attempts = request.retries.max(1);
+    let mut last_error = None;
+    for attempt in 1..=attempts {
+        let pb = ui.spinner(&format!(
+            "assigning runtime · attempt {attempt}/{attempts} · {} {}",
+            request.shape.display_name(),
+            request
+                .accelerator
+                .as_deref()
+                .unwrap_or_else(|| request.variant.display_name())
+        ));
+        match manager
+            .assign(
+                request.label.clone(),
+                request.variant,
+                request.accelerator.clone(),
+                request.shape,
+            )
+            .await
+        {
+            Ok(outcome) => {
+                Ui::spinner_done(pb, "Assigned");
                 println!();
-                println!("{}", heading("Next", *ui));
-                println!(
-                    "  {}",
-                    command_text(
-                        &format!(
-                            "colab-cli run py --code \"print('hello')\" --session \"{}\"",
-                            outcome.server.label
-                        ),
-                        *ui
-                    )
-                );
-                println!(
-                    "  {}",
-                    command_text(
-                        &format!(
-                            "colab-cli fs drive mount --session \"{}\"",
-                            outcome.server.label
-                        ),
-                        *ui
-                    )
-                );
-                println!("  {}", command_text("colab-cli status runtime --all", *ui));
+                ui.success("runtime warmed up");
+                if outcome.shape_mismatch {
+                    ui.warn(&format!(
+                        "Requested {} but Colab provisioned {}. Your account tier may not allow {} shape.",
+                        outcome.requested_shape,
+                        outcome.reported_shape.unwrap_or(Shape::Standard),
+                        outcome.requested_shape,
+                    ));
+                }
+                ui.print_server_status(&outcome.server);
+                return Ok(outcome.server);
             }
-            Ok(outcome.server)
-        }
-        Err(e) => {
-            Ui::spinner_fail(pb, &e.to_string());
-            Err(e)
+            Err(e) => {
+                Ui::spinner_fail(pb, &e.to_string());
+                if !assignment_retryable(&e) || attempt == attempts {
+                    return Err(e);
+                }
+                last_error = Some(e);
+                tokio::time::sleep(retry_delay(attempt)).await;
+                continue;
+            }
         }
     }
+    Err(last_error.unwrap_or_else(|| ColabError::config("runtime assignment failed")))
+}
+
+fn assignment_retryable(e: &ColabError) -> bool {
+    matches!(e, ColabError::ApiError { status, .. } if retryable_status(*status))
+}
+
+fn retry_delay(attempt: u8) -> std::time::Duration {
+    let base = 250u64.saturating_mul(1 << u32::from(attempt.saturating_sub(1)).min(4));
+    let jitter = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_millis() % 150))
+        .unwrap_or(0);
+    std::time::Duration::from_millis(base + jitter)
 }
 
 async fn handle_reconfigure(
@@ -4496,6 +4949,35 @@ mod tests {
         };
         assert_eq!(kind, "drive_browser_approval_required");
         assert_eq!(message, "Drive needs browser approval");
-        assert_eq!(next_action.as_deref(), Some("colab-cli session url --open"));
+        assert_eq!(
+            next_action.as_deref(),
+            Some(
+                "open the session once, then run fs drive mount again: colab-cli session url --open"
+            )
+        );
+    }
+
+    #[test]
+    fn html_api_body_is_trimmed_for_normal_errors() {
+        let raw = "<html><head><title>503 Service Unavailable</title></head><body><h1>Busy</h1></body></html>";
+        let trimmed = trim_raw(raw);
+        assert!(trimmed.contains("503 Service Unavailable"));
+        assert!(!trimmed.contains("<html>"));
+        assert!(!trimmed.contains("<body>"));
+    }
+
+    #[test]
+    fn assignment_503_is_retryable_and_suggests_standard_shape() {
+        let url = "https://colab.research.google.com/tun/m/assign?shape=hm";
+        let err = ColabError::ApiError {
+            status: 503,
+            url: url.to_string(),
+            body: Some("<html>busy</html>".to_string()),
+        };
+        assert!(assignment_retryable(&err));
+        assert_eq!(
+            api_fix(503, url),
+            Some("run again with Standard RAM: colab-cli session new --shape standard")
+        );
     }
 }
