@@ -26,6 +26,9 @@ It should make normal Colab work less annoying:
 - [x] status is human by default and JSON only with `--json`
 - [x] JSON output has no ANSI in covered tests
 - [x] AST observer is local/read-only and gated
+- [x] `run repl` uses local input with remote kernel execution
+- [x] `run shell` uses Colab `/colab/tty` where supported instead of assuming Jupyter terminals
+- [x] settings interactive editing supports back/save/multiple edits
 - [x] release helpers live under private `settings dev release`
 - [ ] run live Drive/session smoke with a real Colab kernel
 - [ ] replace the simple AST parser with Tree-sitter if exact nodes become necessary
@@ -61,6 +64,7 @@ It should make normal Colab work less annoying:
 ## Next Implementation Pass
 
 - run the Drive live smoke once with browser approval
+- run live REPL and shell smoke from a real terminal
 - finish richer `fs sync` remote/cache comparison
 - add exact AST parsing if the current outline is too rough
 - implement MCP stdio only with protocol tests

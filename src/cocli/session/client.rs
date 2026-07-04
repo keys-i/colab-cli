@@ -232,6 +232,36 @@ impl ColabClient {
         Ok(())
     }
 
+    pub async fn kernel_action(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+        kernel_id: &str,
+        action: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/api/kernels/{}/{}",
+            proxy_url.trim_end_matches('/'),
+            kernel_id,
+            action
+        );
+        crate::cocli::debug::debug1(format!("kernel.{action} id={kernel_id}"));
+        crate::cocli::debug::debug2(format!(
+            "http request method=POST path=/api/kernels/{kernel_id}/{action}"
+        ));
+        let resp = self
+            .http
+            .post(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .header(header::CONTENT_LENGTH, "0")
+            .send()
+            .await?;
+        self.check_status_raw(resp, &url).await?;
+        Ok(())
+    }
+
     pub fn terminal_ws_url(&self, proxy_url: &str, terminal_name: &str) -> String {
         let base = proxy_url
             .trim_end_matches('/')

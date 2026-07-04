@@ -504,7 +504,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         }
         Some(Commands::Run { command }) => {
             let config = load_colab_config(cli.quiet)?;
-            handle_run_space(command, &config, ui).await
+            handle_run_space(command, &config, ui, cli.json).await
         }
         Some(Commands::Exec { command }) => {
             migration(&ui, "colab-cli run ...");
@@ -1033,21 +1033,68 @@ async fn handle_session_kernel(
             Ok(())
         }
         SessionKernelCommands::Interrupt(SessionNameArg { session }) => {
-            let _ = session;
-            Err(ColabError::config(
-                "kernel interrupt is not implemented for this runtime API yet",
-            ))
+            let manager = make_manager(config)?;
+            let servers = manager.list_local()?;
+            let server = resolve_server(&servers, session.as_deref())?;
+            let server = ensure_fresh_token(&manager, server, &ui).await?;
+            let sessions = drive_jupyter_sessions_with_retry(
+                manager.client(),
+                &server,
+                std::time::Duration::from_secs(10),
+                0,
+                &ui,
+                false,
+            )
+            .await?;
+            let session = select_drive_kernel(&sessions)?;
+            let kernel_id = session
+                .kernel
+                .as_ref()
+                .map(|kernel| kernel.id.as_str())
+                .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+            manager
+                .client()
+                .kernel_action(
+                    &server.proxy_url,
+                    &server.proxy_token,
+                    kernel_id,
+                    "interrupt",
+                )
+                .await?;
+            println!("kernel interrupted");
+            Ok(())
         }
         SessionKernelCommands::Restart { session, yes } => {
-            let _ = session;
             if !yes {
                 return Err(ColabError::config(
                     "kernel restart requires --yes; it interrupts running work",
                 ));
             }
-            Err(ColabError::config(
-                "kernel restart is not implemented for this runtime API yet",
-            ))
+            let manager = make_manager(config)?;
+            let servers = manager.list_local()?;
+            let server = resolve_server(&servers, session.as_deref())?;
+            let server = ensure_fresh_token(&manager, server, &ui).await?;
+            let sessions = drive_jupyter_sessions_with_retry(
+                manager.client(),
+                &server,
+                std::time::Duration::from_secs(10),
+                0,
+                &ui,
+                false,
+            )
+            .await?;
+            let session = select_drive_kernel(&sessions)?;
+            let kernel_id = session
+                .kernel
+                .as_ref()
+                .map(|kernel| kernel.id.as_str())
+                .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+            manager
+                .client()
+                .kernel_action(&server.proxy_url, &server.proxy_token, kernel_id, "restart")
+                .await?;
+            println!("kernel restarted");
+            Ok(())
         }
     }
 }
@@ -1112,7 +1159,12 @@ async fn handle_session_menu(config: &ColabConfig, ui: Ui) -> Result<()> {
     Ok(())
 }
 
-async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+async fn handle_run_space(
+    cmd: RunCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+) -> Result<()> {
     match cmd {
         RunCommands::Script {
             script,
@@ -1159,9 +1211,7 @@ async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Res
             )
             .await
         }
-        RunCommands::Repl { session } => {
-            handle_exec(ExecCommands::Repl { session }, config, ui).await
-        }
+        RunCommands::Repl { session } => handle_repl(config, ui, session, json).await,
         RunCommands::Shell { session } => {
             handle_exec(ExecCommands::Shell { session }, config, ui).await
         }
@@ -1372,9 +1422,7 @@ async fn handle_exec(cmd: ExecCommands, config: &ColabConfig, ui: Ui) -> Result<
             }
             handle_run(config, ui, session, command).await
         }
-        ExecCommands::Repl { session } => {
-            handle_run(config, ui, session, vec!["python".into()]).await
-        }
+        ExecCommands::Repl { session } => handle_repl(config, ui, session, false).await,
         ExecCommands::Shell { session } => handle_shell(config, ui, session).await,
         ExecCommands::Last { confirm } => {
             if !confirm {
@@ -1385,6 +1433,362 @@ async fn handle_exec(cmd: ExecCommands, config: &ColabConfig, ui: Ui) -> Result<
             ))
         }
     }
+}
+
+async fn handle_repl(
+    config: &ColabConfig,
+    ui: Ui,
+    session_name: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session_name.as_deref())?;
+    let server = ensure_fresh_token(&manager, server, &ui).await?;
+    debug::debug1("run.repl stage=check_jupyter_sessions attempt=1/1");
+    let sessions = match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        manager.client().list_sessions_via_tunnel(&server.endpoint),
+    )
+    .await
+    {
+        Ok(Ok(sessions)) => sessions,
+        Ok(Err(e)) => return Err(repl_runtime_error(&server, "check_jupyter_sessions", e)),
+        Err(_) => {
+            return Err(repl_endpoint_error(
+                &server,
+                "check_jupyter_sessions",
+                "Runtime endpoint timed out",
+            ));
+        }
+    };
+    let session = sessions
+        .iter()
+        .find(|s| s.kernel.is_some())
+        .ok_or_else(|| {
+            ColabError::config(
+                "REPL needs a Colab kernel session\nfix: colab-cli session url --open",
+            )
+        })?;
+    let kernel_id = session
+        .kernel
+        .as_ref()
+        .map(|kernel| kernel.id.clone())
+        .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+
+    if !std::io::stdin().is_terminal() {
+        let mut code = String::new();
+        std::io::stdin().read_to_string(&mut code)?;
+        if code.trim().is_empty() {
+            return Ok(());
+        }
+        let output =
+            execute_repl_code(manager.client(), &server, session, &kernel_id, &code).await?;
+        return print_repl_output(&output, json);
+    }
+
+    if json {
+        return Err(ColabError::config(
+            "run repl --json reads code from stdin; interactive JSON REPL is not supported",
+        ));
+    }
+
+    let version = repl_python_version(manager.client(), &server, session)
+        .await
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("Connected to {} · Python {version}", server.label);
+
+    let mut editor = ReplLineEditor::default();
+    loop {
+        match editor.read_entry()? {
+            ReplInput::Code(code) => {
+                if repl_quit_command(&code) {
+                    break;
+                }
+                let output =
+                    execute_repl_code(manager.client(), &server, session, &kernel_id, &code)
+                        .await?;
+                print_repl_output(&output, false)?;
+            }
+            ReplInput::Interrupt => {
+                let _ = manager
+                    .client()
+                    .kernel_action(
+                        &server.proxy_url,
+                        &server.proxy_token,
+                        &kernel_id,
+                        "interrupt",
+                    )
+                    .await;
+                println!("interrupted");
+            }
+            ReplInput::Eof => break,
+        }
+    }
+    Ok(())
+}
+
+fn repl_runtime_error(server: &StoredServer, stage: &str, error: ColabError) -> ColabError {
+    match error {
+        ColabError::Network(e) => repl_endpoint_error(server, stage, network_error_message(&e)),
+        ColabError::ApiError { status, .. } => repl_endpoint_error(
+            server,
+            stage,
+            &format!("Colab returned {status} {}", http_reason(status)),
+        ),
+        ColabError::ServerNotFound { .. } => {
+            repl_endpoint_error(server, stage, "Runtime endpoint is stale")
+        }
+        other => other,
+    }
+}
+
+fn repl_endpoint_error(server: &StoredServer, stage: &str, message: &str) -> ColabError {
+    ColabError::config(format!(
+        "REPL failed\n\n{message}\nsession: {}\nstage: {stage}\n\nfix: colab-cli session list --refresh\n     colab-cli session new --name work",
+        server.label
+    ))
+}
+
+async fn execute_repl_code(
+    client: &ColabClient,
+    server: &StoredServer,
+    session: &Session,
+    kernel_id: &str,
+    code: &str,
+) -> Result<runner::CellOutput> {
+    let execute = runner::execute_colab_cell_in_session(
+        client,
+        server,
+        session,
+        code,
+        std::time::Duration::from_secs(30),
+    );
+    tokio::pin!(execute);
+    tokio::select! {
+        result = &mut execute => result,
+        _ = tokio::signal::ctrl_c() => {
+            client.kernel_action(&server.proxy_url, &server.proxy_token, kernel_id, "interrupt").await?;
+            println!("interrupted");
+            Ok(runner::CellOutput::default())
+        }
+    }
+}
+
+async fn repl_python_version(
+    client: &ColabClient,
+    server: &StoredServer,
+    session: &Session,
+) -> Option<String> {
+    let output = runner::execute_colab_cell_in_session(
+        client,
+        server,
+        session,
+        "import sys; print(sys.version.split()[0])",
+        std::time::Duration::from_secs(15),
+    )
+    .await
+    .ok()?;
+    let version = output.stdout.trim();
+    (!version.is_empty()).then(|| version.to_string())
+}
+
+fn print_repl_output(output: &runner::CellOutput, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string(output)?);
+        return Ok(());
+    }
+    print!("{}", output.stdout);
+    eprint!("{}", output.stderr);
+    if let Some(name) = &output.error_name {
+        eprintln!("{name}: {}", output.error_value.as_deref().unwrap_or(""));
+    }
+    for line in &output.traceback {
+        eprintln!("{line}");
+    }
+    Ok(())
+}
+
+fn repl_quit_command(code: &str) -> bool {
+    matches!(code.trim(), "exit()" | "quit()" | "/quit")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ReplInput {
+    Code(String),
+    Interrupt,
+    Eof,
+}
+
+#[derive(Default)]
+struct ReplLineEditor {
+    history: Vec<String>,
+}
+
+impl ReplLineEditor {
+    fn read_entry(&mut self) -> Result<ReplInput> {
+        let mut lines = Vec::new();
+        loop {
+            let prompt = if lines.is_empty() { ">>> " } else { "... " };
+            match self.read_line(prompt)? {
+                ReplInput::Code(line) => {
+                    lines.push(line);
+                    if python_needs_more_input(&lines) {
+                        continue;
+                    }
+                    let code = lines.join("\n");
+                    if !code.trim().is_empty() {
+                        self.history.push(code.clone());
+                    }
+                    return Ok(ReplInput::Code(code));
+                }
+                other => return Ok(other),
+            }
+        }
+    }
+
+    fn read_line(&mut self, prompt: &str) -> Result<ReplInput> {
+        use crossterm::{
+            cursor,
+            event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+            execute,
+            style::Print,
+            terminal::{self, ClearType},
+        };
+
+        terminal::enable_raw_mode().map_err(|e| ColabError::config(format!("raw mode: {e}")))?;
+        let _raw = LocalRawModeGuard;
+
+        let mut stdout = std::io::stdout();
+        let mut chars: Vec<char> = Vec::new();
+        let mut cursor_pos = 0usize;
+        let mut history_pos: Option<usize> = None;
+        render_repl_line(prompt, &chars, cursor_pos)?;
+
+        loop {
+            let Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) = event::read().map_err(|e| ColabError::config(format!("terminal read: {e}")))?
+            else {
+                continue;
+            };
+            match (code, modifiers) {
+                (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                    stdout.write_all(b"\r\n")?;
+                    stdout.flush()?;
+                    return Ok(ReplInput::Interrupt);
+                }
+                (KeyCode::Char('d'), KeyModifiers::CONTROL) if chars.is_empty() => {
+                    stdout.write_all(b"\r\n")?;
+                    stdout.flush()?;
+                    return Ok(ReplInput::Eof);
+                }
+                (KeyCode::Enter, _) => {
+                    stdout.write_all(b"\r\n")?;
+                    stdout.flush()?;
+                    return Ok(ReplInput::Code(chars.iter().collect()));
+                }
+                (KeyCode::Backspace, _) if cursor_pos > 0 => {
+                    cursor_pos -= 1;
+                    chars.remove(cursor_pos);
+                }
+                (KeyCode::Delete, _) if cursor_pos < chars.len() => {
+                    chars.remove(cursor_pos);
+                }
+                (KeyCode::Left, _) if cursor_pos > 0 => cursor_pos -= 1,
+                (KeyCode::Right, _) if cursor_pos < chars.len() => cursor_pos += 1,
+                (KeyCode::Home, _) => cursor_pos = 0,
+                (KeyCode::End, _) => cursor_pos = chars.len(),
+                (KeyCode::Up, _) if !self.history.is_empty() => {
+                    let next = history_pos
+                        .map(|pos| pos.saturating_sub(1))
+                        .unwrap_or_else(|| self.history.len() - 1);
+                    history_pos = Some(next);
+                    chars = self.history[next].chars().collect();
+                    cursor_pos = chars.len();
+                }
+                (KeyCode::Down, _) if !self.history.is_empty() => {
+                    if let Some(pos) = history_pos {
+                        if pos + 1 < self.history.len() {
+                            let next = pos + 1;
+                            history_pos = Some(next);
+                            chars = self.history[next].chars().collect();
+                            cursor_pos = chars.len();
+                        } else {
+                            history_pos = None;
+                            chars.clear();
+                            cursor_pos = 0;
+                        }
+                    }
+                }
+                (KeyCode::Char(ch), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                    chars.insert(cursor_pos, ch);
+                    cursor_pos += 1;
+                }
+                _ => {}
+            }
+            execute!(
+                stdout,
+                cursor::MoveToColumn(0),
+                terminal::Clear(ClearType::CurrentLine),
+                Print(prompt),
+                Print(chars.iter().collect::<String>()),
+                cursor::MoveToColumn((prompt.chars().count() + cursor_pos) as u16)
+            )
+            .map_err(|e| ColabError::config(format!("terminal render: {e}")))?;
+            stdout.flush()?;
+        }
+    }
+}
+
+fn render_repl_line(prompt: &str, chars: &[char], cursor_pos: usize) -> Result<()> {
+    use crossterm::{cursor, execute, style::Print, terminal};
+    let mut stdout = std::io::stdout();
+    execute!(
+        stdout,
+        cursor::MoveToColumn(0),
+        terminal::Clear(terminal::ClearType::CurrentLine),
+        Print(prompt),
+        Print(chars.iter().collect::<String>()),
+        cursor::MoveToColumn((prompt.chars().count() + cursor_pos) as u16)
+    )
+    .map_err(|e| ColabError::config(format!("terminal render: {e}")))?;
+    stdout.flush()?;
+    Ok(())
+}
+
+struct LocalRawModeGuard;
+
+impl Drop for LocalRawModeGuard {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
+fn python_needs_more_input(lines: &[String]) -> bool {
+    let Some(last) = lines.last() else {
+        return false;
+    };
+    let trimmed = last.trim_end();
+    if lines.len() > 1 && trimmed.is_empty() {
+        return false;
+    }
+    trimmed.ends_with('\\')
+        || trimmed.ends_with(':')
+        || bracket_balance(&lines.join("\n")) > 0
+        || (lines.len() > 1 && !trimmed.is_empty())
+}
+
+fn bracket_balance(code: &str) -> i32 {
+    let mut balance = 0;
+    for ch in code.chars() {
+        match ch {
+            '(' | '[' | '{' => balance += 1,
+            ')' | ']' | '}' if balance > 0 => balance -= 1,
+            _ => {}
+        }
+    }
+    balance
 }
 
 async fn handle_fs(cmd: FsCommands, config: &ColabConfig, ui: Ui, json: bool) -> Result<()> {
@@ -1655,6 +2059,11 @@ async fn drive_mount(
     preflight_drive_kernel(manager.client(), &server, session, timeout).await?;
 
     drive_stage(&ui, "request_drive_mount", "requesting Drive mount");
+    drive_stage(
+        &ui,
+        "wait_for_browser_approval",
+        "waiting for browser approval if needed",
+    );
     let output = runner::execute_colab_cell_in_session(
         manager.client(),
         &server,
@@ -2989,37 +3398,7 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
     ];
 
     if ui.interactive {
-        let choices: Vec<_> = rows
-            .iter()
-            .filter(|(name, _)| *name != "Dev" || dev_visible(&cfg))
-            .map(|(name, note)| format!("{name} - {note}"))
-            .collect();
-        let choice = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt("Settings")
-            .items(&choices)
-            .default(0)
-            .interact_opt()
-            .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
-        return match choice {
-            Some(1) => handle_settings_ui(None, ui, json),
-            Some(2) => handle_settings_experiments(None, ui, json),
-            Some(3) => handle_ai(Some(AiCommands::Tools { command: None }), ui, json),
-            Some(4) => {
-                println!("Auth");
-                println!("  status         colab-cli auth status");
-                println!("  login adc      colab-cli auth login --method adc");
-                println!("  login oauth2   colab-cli auth login --method oauth2");
-                Ok(())
-            }
-            Some(5) => handle_settings_billing(SettingsBillingCommands::Status, json),
-            Some(6) => {
-                println!("Support");
-                println!("  bug reports     redacted by default");
-                println!("  bundle          colab-cli settings support bundle");
-                Ok(())
-            }
-            _ => print_settings_menu(&path, &cfg, ui, &rows),
-        };
+        return run_settings_editor(path, cfg, SettingsPage::Main, ui);
     }
     print_settings_menu(&path, &cfg, ui, &rows)
 }
@@ -3053,6 +3432,467 @@ fn print_settings_menu(
     println!("  bell            {}", on_off(cfg.ui.bell));
     println!("  experiments     {}", experiments_summary(cfg));
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SettingsPage {
+    Main,
+    General,
+    Ui,
+    Experiments,
+    Ai,
+    Auth,
+    Billing,
+    Support,
+    Dev,
+}
+
+const SETTINGS_FOOTER: &str = "↑/↓ move · enter open/toggle · ←/→ change · space toggle · b/esc back · s save · q quit · ? help";
+
+fn run_settings_editor(
+    path: PathBuf,
+    cfg: config::CocliConfig,
+    start: SettingsPage,
+    ui: Ui,
+) -> Result<()> {
+    use crossterm::{
+        cursor,
+        event::{self, Event, KeyCode, KeyEvent},
+        execute,
+        terminal::{self, ClearType},
+    };
+
+    terminal::enable_raw_mode().map_err(|e| ColabError::config(format!("raw mode: {e}")))?;
+    let _raw = LocalRawModeGuard;
+    let mut state = SettingsEditorState::new(path, cfg, start);
+    let mut stdout = std::io::stdout();
+
+    loop {
+        execute!(
+            stdout,
+            cursor::MoveTo(0, 0),
+            terminal::Clear(ClearType::All)
+        )
+        .map_err(|e| ColabError::config(format!("terminal render: {e}")))?;
+        print_settings_editor(&state, ui)?;
+        stdout.flush()?;
+
+        let Event::Key(KeyEvent { code, .. }) =
+            event::read().map_err(|e| ColabError::config(format!("terminal read: {e}")))?
+        else {
+            continue;
+        };
+        match code {
+            KeyCode::Up => state.move_by(-1),
+            KeyCode::Down => state.move_by(1),
+            KeyCode::Left => state.change_selected(-1),
+            KeyCode::Right => state.change_selected(1),
+            KeyCode::Enter | KeyCode::Char(' ') => state.activate_selected(),
+            KeyCode::Char('s') => state.save()?,
+            KeyCode::Char('?') => state.message = Some(SETTINGS_FOOTER.to_string()),
+            KeyCode::Char('b') | KeyCode::Esc => {
+                if state.back_or_exit()? {
+                    break;
+                }
+            }
+            KeyCode::Char('q') => {
+                if !state.dirty || confirm_discard()? {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    execute!(stdout, cursor::MoveToColumn(0))
+        .map_err(|e| ColabError::config(format!("terminal render: {e}")))?;
+    Ok(())
+}
+
+struct SettingsEditorState {
+    path: PathBuf,
+    cfg: config::CocliConfig,
+    original: config::CocliConfig,
+    page: SettingsPage,
+    stack: Vec<SettingsPage>,
+    selected: usize,
+    dirty: bool,
+    message: Option<String>,
+}
+
+impl SettingsEditorState {
+    fn new(path: PathBuf, cfg: config::CocliConfig, page: SettingsPage) -> Self {
+        Self {
+            path,
+            original: cfg.clone(),
+            cfg,
+            page,
+            stack: Vec::new(),
+            selected: 0,
+            dirty: false,
+            message: None,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self.page {
+            SettingsPage::Main => self.main_pages().len(),
+            SettingsPage::Ui => 10,
+            SettingsPage::Experiments => 7,
+            _ => 1,
+        }
+    }
+
+    fn main_pages(&self) -> Vec<(SettingsPage, &'static str, &'static str)> {
+        let mut pages = vec![
+            (SettingsPage::General, "General", "config path and defaults"),
+            (SettingsPage::Ui, "UI", "colour, theme, motion, terminal"),
+            (
+                SettingsPage::Experiments,
+                "Experiments",
+                "optional features, off by default",
+            ),
+            (SettingsPage::Ai, "AI", "agent and tool workflows"),
+            (SettingsPage::Auth, "Auth", "ADC, OAuth2, and profiles"),
+            (SettingsPage::Billing, "Billing", "Colab billing helpers"),
+            (SettingsPage::Support, "Support", "redacted bug reports"),
+        ];
+        if dev_visible(&self.cfg) {
+            pages.push((SettingsPage::Dev, "Dev", "maintainer-only tools"));
+        }
+        pages
+    }
+
+    fn move_by(&mut self, delta: isize) {
+        let len = self.len();
+        if len == 0 {
+            return;
+        }
+        self.selected = (self.selected as isize + delta).rem_euclid(len as isize) as usize;
+        self.message = None;
+    }
+
+    fn activate_selected(&mut self) {
+        match self.page {
+            SettingsPage::Main => {
+                let pages = self.main_pages();
+                if let Some((page, _, _)) = pages.get(self.selected) {
+                    self.stack.push(self.page);
+                    self.page = *page;
+                    self.selected = 0;
+                }
+            }
+            SettingsPage::Ui => self.change_ui_selected(1),
+            SettingsPage::Experiments => self.toggle_experiment_selected(),
+            _ => self.message = Some("nothing to edit on this page".to_string()),
+        }
+    }
+
+    fn change_selected(&mut self, delta: isize) {
+        match self.page {
+            SettingsPage::Ui => self.change_ui_selected(delta),
+            _ => self.message = Some("left/right changes enum settings".to_string()),
+        }
+    }
+
+    fn change_ui_selected(&mut self, delta: isize) {
+        match self.selected {
+            0 => {
+                self.cfg.ui.color = cycle_color(self.cfg.ui.color, delta);
+                self.mark_dirty();
+            }
+            1 => {
+                self.cfg.ui.neon = !self.cfg.ui.neon;
+                self.mark_dirty();
+            }
+            2 => {
+                self.cfg.ui.theme = cycle_string(
+                    &self.cfg.ui.theme,
+                    &["auto", "light", "dark", "contrast"],
+                    delta,
+                );
+                self.mark_dirty();
+            }
+            3 => toggle(&mut self.cfg.ui.animations),
+            4 => toggle(&mut self.cfg.ui.bell),
+            5 => toggle(&mut self.cfg.ui.fun),
+            6 => toggle(&mut self.cfg.ui.compact),
+            7 => toggle(&mut self.cfg.ui.icons),
+            8 => toggle(&mut self.cfg.ui.unicode),
+            9 => {
+                self.cfg.ui.tui =
+                    cycle_string(&self.cfg.ui.tui, &["auto", "always", "never"], delta);
+                self.mark_dirty();
+            }
+            _ => {}
+        }
+        if matches!(self.selected, 3..=8) {
+            self.mark_dirty();
+        }
+    }
+
+    fn toggle_experiment_selected(&mut self) {
+        match self.selected {
+            0 => self.cfg.experiments.continue_work = !self.cfg.experiments.continue_work,
+            1 => {
+                self.cfg.experiments.distribute = !self.cfg.experiments.distribute;
+                self.cfg.experiments.fleet = self.cfg.experiments.distribute;
+                if !self.cfg.experiments.distribute {
+                    self.cfg.experiments.multi_login = false;
+                }
+            }
+            2 if self.cfg.experiments.distribute => {
+                self.cfg.experiments.multi_login = !self.cfg.experiments.multi_login;
+            }
+            2 => {
+                self.message = Some("multi-login is locked until Distribute is on".to_string());
+                return;
+            }
+            3 => self.cfg.experiments.mcp_server = !self.cfg.experiments.mcp_server,
+            4 => self.cfg.experiments.ai_plan_runner = !self.cfg.experiments.ai_plan_runner,
+            5 => self.cfg.experiments.ast_observer = !self.cfg.experiments.ast_observer,
+            6 => {
+                self.cfg.experiments.background_live_checks =
+                    !self.cfg.experiments.background_live_checks;
+            }
+            _ => {}
+        }
+        self.mark_dirty();
+    }
+
+    fn mark_dirty(&mut self) {
+        self.dirty = self.cfg != self.original;
+        self.message = None;
+    }
+
+    fn save(&mut self) -> Result<()> {
+        self.cfg
+            .save(&self.path)
+            .map_err(|e| ColabError::config(e.to_string()))?;
+        self.original = self.cfg.clone();
+        self.dirty = false;
+        self.message = Some("saved".to_string());
+        Ok(())
+    }
+
+    fn back_or_exit(&mut self) -> Result<bool> {
+        if let Some(page) = self.stack.pop() {
+            self.page = page;
+            self.selected = 0;
+            self.message = None;
+            return Ok(false);
+        }
+        Ok(!self.dirty || confirm_discard()?)
+    }
+}
+
+fn toggle(value: &mut bool) {
+    *value = !*value;
+}
+
+fn cycle_color(color: config::ColorChoice, delta: isize) -> config::ColorChoice {
+    let values = [
+        config::ColorChoice::Auto,
+        config::ColorChoice::Always,
+        config::ColorChoice::Never,
+    ];
+    values[cycle_index(
+        values.iter().position(|v| *v == color).unwrap_or(0),
+        values.len(),
+        delta,
+    )]
+}
+
+fn cycle_string(current: &str, values: &[&str], delta: isize) -> String {
+    values[cycle_index(
+        values.iter().position(|v| *v == current).unwrap_or(0),
+        values.len(),
+        delta,
+    )]
+    .to_string()
+}
+
+fn cycle_index(current: usize, len: usize, delta: isize) -> usize {
+    (current as isize + delta).rem_euclid(len as isize) as usize
+}
+
+fn confirm_discard() -> Result<bool> {
+    use crossterm::{
+        event::{self, Event, KeyCode, KeyEvent},
+        terminal,
+    };
+    print!("\r\nDiscard changes? y/N ");
+    std::io::stdout().flush()?;
+    loop {
+        let Event::Key(KeyEvent { code, .. }) =
+            event::read().map_err(|e| ColabError::config(format!("terminal read: {e}")))?
+        else {
+            continue;
+        };
+        match code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
+                terminal::enable_raw_mode()
+                    .map_err(|e| ColabError::config(format!("raw mode: {e}")))?;
+                return Ok(false);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn print_settings_editor(state: &SettingsEditorState, ui: Ui) -> Result<()> {
+    println!(
+        "{}{}",
+        heading(settings_page_title(state.page), ui),
+        if state.dirty { "  unsaved changes" } else { "" }
+    );
+    println!("{}", settings_page_subtitle(state.page));
+    println!();
+    match state.page {
+        SettingsPage::Main => {
+            for (idx, (_, label, desc)) in state.main_pages().iter().enumerate() {
+                print_settings_row(idx == state.selected, label, desc, ui);
+            }
+        }
+        SettingsPage::General => {
+            println!("Config path");
+            println!("  {}", path_text(&state.path.display().to_string(), ui));
+            println!();
+            println!("color        {}", color_choice_name(state.cfg.ui.color));
+            println!("theme        {}", state.cfg.ui.theme);
+            println!("experiments  {}", experiments_summary(&state.cfg));
+        }
+        SettingsPage::Ui => {
+            let rows = [
+                (
+                    "Color mode",
+                    color_choice_name(state.cfg.ui.color).to_string(),
+                    "auto / always / never",
+                ),
+                (
+                    "Neon accents",
+                    on_off(state.cfg.ui.neon).to_string(),
+                    "brighter accents",
+                ),
+                (
+                    "Theme",
+                    state.cfg.ui.theme.clone(),
+                    "auto / light / dark / contrast",
+                ),
+                (
+                    "Animations",
+                    on_off(state.cfg.ui.animations).to_string(),
+                    "interactive progress motion",
+                ),
+                (
+                    "Terminal bell",
+                    on_off(state.cfg.ui.bell).to_string(),
+                    "optional bell after long jobs",
+                ),
+                (
+                    "Fun lines",
+                    on_off(state.cfg.ui.fun).to_string(),
+                    "rare harmless interactive lines",
+                ),
+                (
+                    "Compact output",
+                    on_off(state.cfg.ui.compact).to_string(),
+                    "less spacing",
+                ),
+                (
+                    "Icons",
+                    on_off(state.cfg.ui.icons).to_string(),
+                    "small symbols in output",
+                ),
+                (
+                    "Unicode",
+                    on_off(state.cfg.ui.unicode).to_string(),
+                    "smooth borders and glyphs",
+                ),
+                (
+                    "TUI panels",
+                    state.cfg.ui.tui.clone(),
+                    "auto / always / never",
+                ),
+            ];
+            for (idx, (label, value, desc)) in rows.iter().enumerate() {
+                print_settings_row(
+                    idx == state.selected,
+                    label,
+                    &format!("{value:<8} {desc}"),
+                    ui,
+                );
+            }
+        }
+        SettingsPage::Experiments => {
+            for (idx, item) in experiment_items(&state.cfg).iter().enumerate() {
+                let locked = idx == 2 && !state.cfg.experiments.distribute;
+                let value = if locked {
+                    "locked".to_string()
+                } else {
+                    on_off(item.enabled).to_string()
+                };
+                print_settings_row(
+                    idx == state.selected,
+                    item.label,
+                    &format!("{value:<7} {}", item.risk),
+                    ui,
+                );
+            }
+        }
+        SettingsPage::Ai => {
+            println!("AI tools list is read-only by default.");
+            println!("MCP and plan runner are controlled under Experiments.");
+        }
+        SettingsPage::Auth => {
+            println!("ADC and OAuth2 profiles live under `colab-cli auth`.");
+            println!("Tokens are not stored in config.toml.");
+        }
+        SettingsPage::Billing => {
+            println!("Billing helpers live under `colab-cli settings billing`.");
+            println!("Exact compute-unit status is shown only when available.");
+        }
+        SettingsPage::Support => {
+            println!("Bug reports are redacted by default.");
+            println!("Use `colab-cli settings support bug-report` for a bundle.");
+        }
+        SettingsPage::Dev => println!("Private maintainer tools."),
+    }
+    if let Some(message) = &state.message {
+        println!();
+        println!("{}", muted(message, ui));
+    }
+    println!();
+    println!("{}", muted(SETTINGS_FOOTER, ui));
+    Ok(())
+}
+
+fn print_settings_row(selected: bool, label: &str, desc: &str, ui: Ui) {
+    let marker = if selected { "›" } else { " " };
+    println!("{marker} {:<16} {}", label, muted(desc, ui));
+}
+
+fn settings_page_title(page: SettingsPage) -> &'static str {
+    match page {
+        SettingsPage::Main => "Settings",
+        SettingsPage::General => "General",
+        SettingsPage::Ui => "UI settings",
+        SettingsPage::Experiments => "Experiments",
+        SettingsPage::Ai => "AI",
+        SettingsPage::Auth => "Auth",
+        SettingsPage::Billing => "Billing",
+        SettingsPage::Support => "Support",
+        SettingsPage::Dev => "Dev",
+    }
+}
+
+fn settings_page_subtitle(page: SettingsPage) -> &'static str {
+    match page {
+        SettingsPage::Main => "Config, UI, experiments, support",
+        SettingsPage::Ui => "Changes are saved to config.toml",
+        SettingsPage::Experiments => "Optional features are off by default",
+        _ => "b/esc back · q quit",
+    }
 }
 
 fn handle_config_get_key(key: &str, json: bool) -> Result<()> {
@@ -3177,37 +4017,13 @@ fn handle_settings_experiments(
 
 fn render_experiments(ui: Ui, json: bool) -> Result<()> {
     let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
-    let mut cfg =
-        config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+    let cfg = config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
     if json {
         return print_value(true, &cfg.experiments);
     }
 
-    let items = experiment_items(&cfg);
     if ui.interactive {
-        let labels: Vec<_> = items
-            .iter()
-            .map(|item| format!("{} - {}", item.label, item.risk))
-            .collect();
-        let defaults: Vec<_> = items.iter().map(|item| item.enabled).collect();
-        let selected =
-            dialoguer::MultiSelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                .with_prompt("Experiments")
-                .items(&labels)
-                .defaults(&defaults)
-                .interact_opt()
-                .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
-        if let Some(selected) = selected {
-            cfg.experiments.continue_work = selected.contains(&0);
-            cfg.experiments.distribute = selected.contains(&1);
-            cfg.experiments.multi_login = selected.contains(&2) && cfg.experiments.distribute;
-            cfg.experiments.mcp_server = selected.contains(&3);
-            cfg.experiments.ai_plan_runner = selected.contains(&4);
-            cfg.experiments.ast_observer = selected.contains(&5);
-            cfg.experiments.background_live_checks = selected.contains(&6);
-            cfg.save(&path)
-                .map_err(|e| ColabError::config(e.to_string()))?;
-        }
+        return run_settings_editor(path, cfg, SettingsPage::Experiments, ui);
     }
 
     println!("{}", heading("Experiments", ui));
@@ -3344,48 +4160,13 @@ fn experiments_summary(cfg: &config::CocliConfig) -> String {
 
 fn render_ui_settings(ui: Ui, json: bool) -> Result<()> {
     let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
-    let mut cfg =
-        config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+    let cfg = config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
     if json {
         return print_value(true, &cfg.ui);
     }
 
-    let items = ui_items(&cfg);
     if ui.interactive {
-        let labels: Vec<_> = items
-            .iter()
-            .map(|item| format!("{} - {}", item.label, item.description))
-            .collect();
-        let defaults: Vec<_> = items.iter().map(|item| item.enabled).collect();
-        let selected =
-            dialoguer::MultiSelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                .with_prompt("UI settings")
-                .items(&labels)
-                .defaults(&defaults)
-                .interact_opt()
-                .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
-        if let Some(selected) = selected {
-            cfg.ui.color = if selected.contains(&0) {
-                config::ColorChoice::Auto
-            } else {
-                config::ColorChoice::Never
-            };
-            cfg.ui.animations = selected.contains(&1);
-            cfg.ui.bell = selected.contains(&2);
-            cfg.ui.fun = selected.contains(&3);
-            cfg.ui.compact = selected.contains(&4);
-            cfg.ui.icons = selected.contains(&5);
-            cfg.ui.unicode = selected.contains(&6);
-            cfg.ui.tui = if selected.contains(&7) {
-                "always".to_string()
-            } else if selected.contains(&8) {
-                "never".to_string()
-            } else {
-                "auto".to_string()
-            };
-            cfg.save(&path)
-                .map_err(|e| ColabError::config(e.to_string()))?;
-        }
+        return run_settings_editor(path, cfg, SettingsPage::Ui, ui);
     }
 
     println!("{}", heading("UI settings", ui));
@@ -6509,6 +7290,64 @@ mod tests {
         assert!(code.contains("from google.colab import drive"));
         assert!(code.contains("drive.mount(\"/content/drive\", force_remount=False)"));
         assert!(!code.contains("python -c"));
+    }
+
+    #[test]
+    fn repl_multiline_detection_is_conservative() {
+        assert!(!python_needs_more_input(&["print(1)".to_string()]));
+        assert!(python_needs_more_input(&["def f():".to_string()]));
+        assert!(python_needs_more_input(&[
+            "def f():".to_string(),
+            "    return 1".to_string()
+        ]));
+        assert!(!python_needs_more_input(&[
+            "def f():".to_string(),
+            "    return 1".to_string(),
+            "".to_string()
+        ]));
+        assert!(python_needs_more_input(&["print(".to_string()]));
+    }
+
+    #[test]
+    fn settings_state_navigates_and_batches_edits() {
+        let cfg = config::CocliConfig::default();
+        let mut state =
+            SettingsEditorState::new(PathBuf::from("config.toml"), cfg, SettingsPage::Main);
+        state.selected = 1;
+        state.activate_selected();
+        assert_eq!(state.page, SettingsPage::Ui);
+        state.selected = 3;
+        state.activate_selected();
+        state.selected = 4;
+        state.activate_selected();
+        assert!(!state.cfg.ui.animations);
+        assert!(state.cfg.ui.bell);
+        assert!(state.dirty);
+        assert!(!state.back_or_exit().unwrap());
+        assert_eq!(state.page, SettingsPage::Main);
+    }
+
+    #[test]
+    fn settings_state_locks_multi_login_until_distribute() {
+        let cfg = config::CocliConfig::default();
+        let mut state =
+            SettingsEditorState::new(PathBuf::from("config.toml"), cfg, SettingsPage::Experiments);
+        state.selected = 2;
+        state.activate_selected();
+        assert!(!state.cfg.experiments.multi_login);
+        assert!(
+            state
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("locked")
+        );
+        state.selected = 1;
+        state.activate_selected();
+        state.selected = 2;
+        state.activate_selected();
+        assert!(state.cfg.experiments.distribute);
+        assert!(state.cfg.experiments.multi_login);
     }
 
     #[test]

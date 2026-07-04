@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use clap::Parser;
-use colab_cli::cocli::cli::args::Cli;
+use colab_cli::cocli::cli::args::{Cli, Commands, FsCommands, FsDriveCommands};
 
 #[test]
 fn parses_major_command_spaces() {
@@ -10,6 +10,8 @@ fn parses_major_command_spaces() {
         ["colab-cli", "run", "last", "--confirm"].as_slice(),
         ["colab-cli", "run", "py", "--code", "print(1)"].as_slice(),
         ["colab-cli", "run", "notebook", "report.ipynb"].as_slice(),
+        ["colab-cli", "run", "repl"].as_slice(),
+        ["colab-cli", "run", "shell"].as_slice(),
         ["colab-cli", "run", "pip", "install", "torch"].as_slice(),
         ["colab-cli", "run", "pip", "freeze"].as_slice(),
         ["colab-cli", "run", "pip", "restore", "requirements.txt"].as_slice(),
@@ -96,6 +98,27 @@ fn parses_major_command_spaces() {
     ] {
         Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
     }
+}
+
+#[test]
+fn drive_mount_timeout_default_allows_human_auth() {
+    let cli = Cli::try_parse_from(["colab-cli", "fs", "drive", "mount"]).unwrap();
+    let Some(Commands::Fs {
+        command:
+            FsCommands::Drive {
+                command:
+                    FsDriveCommands::Mount {
+                        timeout,
+                        preflight_timeout,
+                        ..
+                    },
+            },
+    }) = cli.command
+    else {
+        panic!("expected fs drive mount");
+    };
+    assert_eq!(timeout, 600);
+    assert_eq!(preflight_timeout, 10);
 }
 
 #[test]

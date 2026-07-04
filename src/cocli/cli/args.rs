@@ -584,7 +584,7 @@ pub enum FsDriveCommands {
         path: String,
         #[arg(long)]
         dry_run: bool,
-        #[arg(long, default_value_t = 180)]
+        #[arg(long, default_value_t = 600)]
         timeout: u64,
         #[arg(long, default_value_t = 10)]
         preflight_timeout: u64,
@@ -661,7 +661,7 @@ pub enum MountCommands {
         session: Option<String>,
         #[arg(long, default_value = "/content/drive")]
         path: String,
-        #[arg(long, default_value_t = 120)]
+        #[arg(long, default_value_t = 600)]
         timeout: u64,
         #[arg(long, default_value_t = 10)]
         preflight_timeout: u64,

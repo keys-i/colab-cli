@@ -6,6 +6,8 @@ Verbose mode is for debugging cocli, not normal use.
 colab-cli -v status
 colab-cli -vv fs drive mount
 colab-cli -vvv fs drive mount
+colab-cli -v run repl
+colab-cli -v run shell
 ```
 
 Levels:
@@ -42,3 +44,20 @@ debug1: drive.mount failed kind=runtime_endpoint_timeout stage=check_jupyter_ses
 ```
 
 Attach `-vv` output to bug reports when possible. Use `-vvv` only when request details are needed; it is still redacted, but it is noisier.
+
+Interactive transport examples:
+
+```text
+debug1: command run.shell
+debug1: run.shell transport=colab_tty
+debug1: run.shell websocket connecting path=/colab/tty
+```
+
+```text
+debug1: command run.repl
+debug1: run.repl stage=check_jupyter_sessions attempt=1/1
+```
+
+The REPL uses the Jupyter kernel websocket. Shell uses Colab's PTY websocket
+where supported. Neither prints proxy tokens or full signed URLs in normal
+human errors.

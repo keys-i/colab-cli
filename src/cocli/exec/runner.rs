@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use crate::cocli::session::store::StoredServer;
 pub type TokenRefresher =
     Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<StoredServer>> + Send>> + Send + Sync>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct CellOutput {
     pub stdout: String,
     pub stderr: String,
@@ -169,38 +169,27 @@ pub async fn run_shell(
     initial_command: Option<&str>,
     refresher: Option<TokenRefresher>,
 ) -> Result<()> {
-    let term = client
-        .create_terminal(&server.proxy_url, &server.proxy_token)
-        .await?;
-
-    let ws_url = client.terminal_ws_url(&server.proxy_url, &term.name);
+    let ws_url = colab_tty_ws_url(&server.proxy_url, &server.proxy_token)?;
+    crate::cocli::debug::debug1("run.shell transport=colab_tty");
+    crate::cocli::debug::debug1("run.shell websocket connecting path=/colab/tty");
+    crate::cocli::debug::debug3(format!(
+        "run.shell websocket url={}",
+        crate::cocli::debug::sanitize_url(&ws_url)
+    ));
     let request = build_ws_request(&ws_url, &server.proxy_token)?;
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(request)
         .await
-        .map_err(|e| ColabError::oauth(format!("WebSocket connect failed: {e}")))?;
+        .map_err(shell_unavailable_error)?;
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
     if let Ok((cols, rows)) = terminal::size() {
-        let size_msg = serde_json::json!(["set_size", rows, cols]).to_string();
-        let _ = ws_write
-            .send(tungstenite::Message::Text(size_msg.into()))
-            .await;
+        let _ = send_colab_tty_resize(&mut ws_write, rows, cols).await;
     }
 
-    // PS1 = "<name> /path #". clear wipes the default prompt that flashed first.
-    let label_esc = server.label.replace('\'', "'\\''");
-    let prompt_cmd = format!("export PS1='\\[\\e[36m\\]{label_esc}\\[\\e[0m\\] \\w # ' && clear\n");
-    let _ = ws_write
-        .send(tungstenite::Message::Text(
-            serde_json::json!(["stdin", prompt_cmd]).to_string().into(),
-        ))
-        .await;
-
     if let Some(cmd) = initial_command {
-        let msg = serde_json::json!(["stdin", format!("{cmd}\n")]).to_string();
-        let _ = ws_write.send(tungstenite::Message::Text(msg.into())).await;
+        let _ = send_colab_tty_input(&mut ws_write, &format!("{cmd}\n")).await;
     }
 
     // ping every 4min to keep the runtime warm and rotate the proxy token.
@@ -224,10 +213,48 @@ pub async fn run_shell(
     });
     let _keepalive_guard = AbortOnDrop(keepalive_handle);
 
+    if !io::stdin().is_terminal() {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        if !input.is_empty() {
+            send_colab_tty_input(&mut ws_write, &input).await?;
+        }
+        send_colab_tty_input(&mut ws_write, "exit\n").await?;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+        while tokio::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            match tokio::time::timeout(remaining, ws_read.next()).await {
+                Ok(Some(Ok(tungstenite::Message::Text(text)))) => {
+                    if let Some(data) = parse_colab_tty_frame(text.as_ref()) {
+                        let mut stdout = io::stdout().lock();
+                        let _ = stdout.write_all(data.as_bytes());
+                        let _ = stdout.flush();
+                    }
+                }
+                Ok(Some(Ok(tungstenite::Message::Binary(data)))) => {
+                    let mut stdout = io::stdout().lock();
+                    let _ = stdout.write_all(&data);
+                    let _ = stdout.flush();
+                }
+                Ok(Some(Ok(tungstenite::Message::Close(_)))) | Ok(None) => break,
+                _ => {}
+            }
+        }
+        let _ = ws_write.close().await;
+        return Ok(());
+    }
+
     terminal::enable_raw_mode().map_err(|e| ColabError::config(format!("raw mode: {e}")))?;
     let _raw_guard = RawModeGuard;
 
-    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    #[derive(Debug)]
+    enum ShellOut {
+        Stdin(Vec<u8>),
+        Resize(u16, u16),
+    }
+
+    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<ShellOut>(64);
+    let resize_tx = stdin_tx.clone();
 
     std::thread::spawn(move || {
         let stdin = io::stdin();
@@ -237,7 +264,10 @@ pub async fn run_shell(
             match handle.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if stdin_tx.blocking_send(buf[..n].to_vec()).is_err() {
+                    if stdin_tx
+                        .blocking_send(ShellOut::Stdin(buf[..n].to_vec()))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -246,12 +276,32 @@ pub async fn run_shell(
         }
     });
 
+    let resize_handle = tokio::spawn(async move {
+        let mut last = terminal::size().unwrap_or((80, 24));
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            let cur = terminal::size().unwrap_or(last);
+            if cur != last
+                && resize_tx
+                    .send(ShellOut::Resize(cur.1, cur.0))
+                    .await
+                    .is_err()
+            {
+                return;
+            }
+            last = cur;
+        }
+    });
+    let _resize_guard = AbortOnDrop(resize_handle);
+
     loop {
         tokio::select! {
             msg = ws_read.next() => {
                 match msg {
                     Some(Ok(tungstenite::Message::Text(text))) => {
-                        if let Some(data) = parse_stdout_frame(text.as_ref()) {
+                        if let Some(data) = parse_colab_tty_frame(text.as_ref()) {
                             let mut stdout = io::stdout().lock();
                             let _ = stdout.write_all(data.as_bytes());
                             let _ = stdout.flush();
@@ -269,16 +319,14 @@ pub async fn run_shell(
             }
             data = stdin_rx.recv() => {
                 match data {
-                    Some(bytes) => {
+                    Some(ShellOut::Stdin(bytes)) => {
                         let text = String::from_utf8_lossy(&bytes);
-                        let msg = serde_json::json!(["stdin", text]).to_string();
-                        if ws_write
-                            .send(tungstenite::Message::Text(msg.into()))
-                            .await
-                            .is_err()
-                        {
+                        if send_colab_tty_input(&mut ws_write, &text).await.is_err() {
                             break;
                         }
+                    }
+                    Some(ShellOut::Resize(rows, cols)) => {
+                        let _ = send_colab_tty_resize(&mut ws_write, rows, cols).await;
                     }
                     None => break,
                 }
@@ -287,6 +335,54 @@ pub async fn run_shell(
     }
 
     Ok(())
+}
+
+fn colab_tty_ws_url(proxy_url: &str, proxy_token: &str) -> Result<String> {
+    let url = reqwest::Url::parse(proxy_url)
+        .map_err(|e| ColabError::config(format!("invalid runtime endpoint: {e}")))?;
+    let scheme = if url.scheme() == "http" { "ws" } else { "wss" };
+    let host = url
+        .host_str()
+        .ok_or_else(|| ColabError::config("runtime endpoint has no host"))?;
+    let port = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+    Ok(format!(
+        "{scheme}://{host}{port}/colab/tty?colab-runtime-proxy-token={}",
+        urlencoding::encode(proxy_token)
+    ))
+}
+
+async fn send_colab_tty_input<S>(ws_write: &mut S, data: &str) -> Result<()>
+where
+    S: futures_util::Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin,
+{
+    ws_write
+        .send(tungstenite::Message::Text(
+            serde_json::json!({ "data": data }).to_string().into(),
+        ))
+        .await
+        .map_err(|e| ColabError::oauth(format!("WebSocket send: {e}")))
+}
+
+async fn send_colab_tty_resize<S>(ws_write: &mut S, rows: u16, cols: u16) -> Result<()>
+where
+    S: futures_util::Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin,
+{
+    ws_write
+        .send(tungstenite::Message::Text(
+            serde_json::json!({ "rows": rows, "cols": cols })
+                .to_string()
+                .into(),
+        ))
+        .await
+        .map_err(|e| ColabError::oauth(format!("WebSocket resize: {e}")))
+}
+
+fn shell_unavailable_error(error: tungstenite::Error) -> ColabError {
+    crate::cocli::debug::debug1("run.shell transport=colab_tty failed");
+    crate::cocli::debug::debug3(format!("run.shell websocket error={error}"));
+    ColabError::config(
+        "Shell is not available on this runtime\nfix: use `colab-cli run py --code \"...\"`\n     or open the browser session with `colab-cli session url --open`",
+    )
 }
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
@@ -1006,6 +1102,14 @@ fn parse_stdout_frame(text: &str) -> Option<String> {
     }
 }
 
+fn parse_colab_tty_frame(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    value
+        .get("data")
+        .and_then(|data| data.as_str())
+        .map(str::to_string)
+}
+
 struct RawModeGuard;
 
 impl Drop for RawModeGuard {
@@ -1030,6 +1134,29 @@ mod tests {
     #[test]
     fn host_from_url_no_path() {
         assert_eq!(host_from_url("wss://example.com"), "example.com");
+    }
+
+    #[test]
+    fn colab_tty_url_uses_root_tty_endpoint() {
+        let url = colab_tty_ws_url(
+            "https://colab.research.google.com/tun/m/runtime-abc",
+            "token value",
+        )
+        .unwrap();
+        assert_eq!(
+            url,
+            "wss://colab.research.google.com/colab/tty?colab-runtime-proxy-token=token%20value"
+        );
+        assert!(!url.contains("/api/terminals"));
+    }
+
+    #[test]
+    fn parses_colab_tty_data_frame() {
+        assert_eq!(
+            parse_colab_tty_frame(r#"{"data":"HELLO\n"}"#).as_deref(),
+            Some("HELLO\n")
+        );
+        assert_eq!(parse_colab_tty_frame(r#"["stdout","old"]"#), None);
     }
 
     #[test]

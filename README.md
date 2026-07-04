@@ -94,6 +94,8 @@ colab-cli run notebook notebook.ipynb --session trainer --out executed.ipynb
 colab-cli run notebook notebook.ipynb --ast --session trainer
 colab-cli run repl --session trainer
 colab-cli run shell --session trainer
+echo "print('hello')" | colab-cli run repl --session trainer
+echo "echo HELLO" | colab-cli run shell --session trainer
 colab-cli run pip install torch transformers --session trainer
 colab-cli run pip install -r requirements.txt --session trainer
 colab-cli run pip freeze --session trainer
@@ -191,6 +193,7 @@ cargo doc --no-deps
 - [Output style](docs/output-style.md)
 - [Debugging](docs/debugging.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Use cases](docs/use-cases.md)
 - [Perf pass](docs/perf-pass.md)
 - [Claims ledger](docs/claims-ledger.md)
 - [QA](docs/qa.md)

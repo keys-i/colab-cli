@@ -12,6 +12,17 @@ Open the sectioned settings view:
 colab-cli settings
 ```
 
+In a TTY, `settings`, `settings ui`, and `settings experiments` open the same
+interactive editor. It supports multiple edits before one save.
+
+```text
+↑/↓ move · enter open/toggle · ←/→ change · space toggle · b/esc back · s save · q quit · ? help
+```
+
+`s` writes all pending edits to `config.toml` and stays in the editor. `b` or
+Esc returns to the previous screen. Quitting with unsaved changes asks before
+discarding. There is no command preview and no advertised search key.
+
 Set one key:
 
 ```sh
@@ -90,6 +101,9 @@ colab-cli settings ui set unicode true
 ```
 
 `--no-color` is still available as an emergency one-shot override. Normal colour mode belongs in settings.
+
+Interactive UI settings include color mode, neon accents, theme, animations,
+terminal bell, fun lines, compact output, icons, unicode, and TUI panels.
 
 ## Experiments
 

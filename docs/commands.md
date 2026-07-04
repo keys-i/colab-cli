@@ -48,6 +48,10 @@ colab-cli run last --confirm
 
 `--ast` prints a local code outline before execution when the AST observer experiment is enabled.
 
+`run repl` uses the attached Jupyter kernel, not a raw remote `python` process.
+`run shell` uses the Colab `/colab/tty` PTY websocket where supported, not
+Jupyter `/api/terminals` by default.
+
 ## Fs
 
 ```sh

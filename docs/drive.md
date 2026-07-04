@@ -4,7 +4,7 @@ Drive lives under `fs` because it changes the runtime filesystem.
 
 ```sh
 colab-cli fs drive mount --session trainer
-colab-cli fs drive mount --session trainer --timeout 180 --preflight-timeout 10 --retries 2
+colab-cli fs drive mount --session trainer --timeout 600 --preflight-timeout 10 --retries 2
 colab-cli fs drive status --session trainer
 colab-cli fs drive list --session trainer
 colab-cli fs drive unmount --session trainer
@@ -78,7 +78,7 @@ Drive auth can require browser approval. Use:
 colab-cli fs drive mount --session trainer --open
 ```
 
-The CLI will not wait forever. If approval is still pending at the timeout, it exits with a next action instead of dumping a Python traceback.
+The default mount timeout is 600 seconds because Drive approval can involve a browser step. Endpoint preflight stays short at 10 seconds. If approval is still pending at the timeout, cocli exits with a next action instead of dumping a Python traceback.
 
 ## Enterprise And Unsupported Runtimes
 

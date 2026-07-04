@@ -24,3 +24,23 @@ Reference: `googlecolab/google-colab-cli`. cocli uses it as a feature reference 
 | `update` | `colab-cli settings update check`, `settings update install --yes` | surface added | Check is local; install refuses blind self-modification. |
 
 Compatibility aliases stay hidden from normal help. New docs use only the cocli command spaces.
+
+## Interactive execution mapping
+
+| google command | cocli command | Transport | Note |
+|---|---|---|---|
+| `colab repl` | `colab-cli run repl` | Jupyter kernel messaging | Local line editor sends code as kernel `execute_request`; piped stdin executes once. |
+| `colab console` | `colab-cli run shell` | Colab `/colab/tty` PTY websocket | cocli does not assume `/api/terminals` exists for shell. Piped stdin sends `exit\n` on EOF. |
+| `colab exec` | `colab-cli run py`, `run script`, `run notebook` | Runtime execution path | Core execution stays under `run`; old `exec` is a hidden alias. |
+| `colab drivemount` | `colab-cli fs drive mount` | Kernel execution | Runs `google.colab.drive.mount()` in the attached Colab kernel and allows long browser approval time. |
+| `colab log` | `colab-cli session logs` | Local cocli log/export surface | Does not invent unavailable remote logs. |
+| `colab restart-kernel` | `colab-cli session kernel restart --yes` | Jupyter kernel API | Confirmation-gated because it interrupts work. |
+
+Related transports:
+
+| Area | Transport |
+|---|---|
+| Files | Jupyter Contents API where supported. |
+| Kernel status/interrupt/restart | Jupyter kernel/session APIs where supported. |
+| Drive approval | Kernel execution plus browser approval guidance; proprietary Colab credential propagation is not copied or vendored. |
+| Auth | CLI auth stays under `auth`; VM-side browser credentials are only requested by explicit auth/Drive workflows. |
