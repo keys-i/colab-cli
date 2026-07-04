@@ -2,15 +2,15 @@
 
 | Project | Feature A | Feature B | Decision | New command/module | Why |
 |---|---|---|---|---|---|
-| cocli | `env doctor` | `doctor env` | merge | `status run` | diagnostics belong under one status surface |
-| cocli | `mount check` | `doctor mounts` | merge | `status drive` | same user question: what broke? |
-| cocli | `runtime backend-info` | `runtime info --backend` | merge | `status runtime --backend` | one runtime status path |
-| cocli | `config path` | `config locate` | alias | `settings path` | reduces recall without new logic |
-| cocli | `fs diff` | `fs changed` | keep alias | `fs changed` | friendlier wording for humans |
-| cocli | `fleet cost` | `fleet plan --cost` | merge | `fleet plan --cost` | cost is part of planning |
-| cocli | MCP server | skills JSON registry | defer | `settings skills list` | no tested standalone MCP server yet |
-| Shipyard | `notes` internals | `changelog` internals | merge | `changelog::notes_for` | one grouping path |
-| Shipyard | `status` | `doctor` | keep both | `status`, `doctor` | status is state; doctor checks tooling |
-| Shipyard | `tag` | `release` | keep standalone | `tag --dry-run` | useful for tag preview |
-| Shipyard | `publish` safety | `release` safety | merge internals | `publish::ensure_publish_allowed` | one gate for destructive release work |
-| Shipyard | `compare` | `bench` | alias | `bench` | compare wraps bench unless competitor tools exist |
+| cocli | `env install/freeze/restore` | `run install/freeze/restore` | merge | `run pip install/freeze/restore` | one package-management surface |
+| cocli | `slurp` | `fleet` | merge | `distribute recipe/pool/shard` | one experimental workflow area |
+| cocli | `tools` | `agent` | merge | `ai tools`, `ai plan`, `ai audit` | one agent-facing command space |
+| cocli | `config` | settings | merge | `settings` | local config belongs in one place |
+| cocli | `doctor` | status | merge | `status check` | diagnostics are status reads |
+| cocli | `runtime` | status runtime | merge | `status runtime` | one runtime status path |
+| cocli | `mount` | fs drive | merge | `fs drive` | Drive is filesystem work |
+| cocli | release helpers | public CLI | hide | `settings dev release` | private maintainer tools only |
+| cocli | MCP server | tool catalog | defer server | `ai mcp` gated | no fake server; return honest not-implemented error |
+| Shipyard | release UI polish | broader TUI | keep sober | existing release surfaces | release tool first |
+
+Internal module names `slurp` and `fleet` remain for the existing parser/planner implementation. User-facing docs should say `recipe`, `pool`, `shard`, and `distribute`.

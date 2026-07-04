@@ -23,8 +23,8 @@ src/cocli/
   exec/       shell and command runners
   fs/         manifests, excludes, sync planning
   runtime/    runtime metadata and Colab command snippets
-  slurp/      Slurp TOML parsing and explanation
-  fleet/      compliance checks and scheduler planning
+  slurp/      internal recipe TOML parsing
+  fleet/      internal distribute compliance and scheduler planning
   continue/   continuation manifest and resume planning
   tools/      built-in registry shown through settings skills
   config/     config files behind settings
@@ -39,4 +39,4 @@ Invariants:
 - JSON output contains no ANSI
 - destructive commands need explicit confirmation
 - continuation is checkpoint/replay, not live Python memory transfer
-- fleet mode is planning for approved runtimes, not free-tier quota bypass
+- distribute mode is planning for approved runtimes, not quota bypass

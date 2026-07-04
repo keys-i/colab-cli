@@ -15,9 +15,9 @@ Both tools use one output rule: human output is short; JSON is machine-only.
 | muted | secondary detail, grey |
 | accent | headings and IDs, violet/blue |
 
-No raw ANSI in JSON. Respect `NO_COLOR`, `--no-color`, `--quiet`, and CI. `--color always` is the explicit override for piped human output.
+No raw ANSI in JSON. Respect `NO_COLOR`, `--no-color`, `--quiet`, and CI. Persistent colour mode is configured with `colab-cli settings ui set color auto|always|never`.
 
-The no-command launcher is interactive-only. In pipes or scripts, output stays plain and predictable.
+Running `colab-cli` with no args prints help. It does not open a launcher.
 
 ## Formats
 

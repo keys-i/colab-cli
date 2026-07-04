@@ -4,7 +4,7 @@
 
 cocli is not trying to act like Google's tools don't exist. The useful work is to read them, keep the parts that make sense, and build a sharper Rust CLI around the gaps this project cares about.
 
-The main things I wanted from the references were command clarity, file sync, continuation, Slurp config, stable JSON, useful status checks, and safer account/fleet boundaries.
+The main things I wanted from the references were command clarity, file sync, continuation, recipe config, stable JSON, useful status checks, and safer distribute boundaries.
 
 `google-colab-cli` already covers a lot of normal work: session/runtime commands, execution, file movement, installs, logs, Drive mounting, and agent-style workflows. `colab-mcp` pushed the agent/tool direction: make tools discoverable and make state explicit. `colabtools` and `backend-info` are useful for runtime metadata thinking, but they are not a code source for this project.
 
@@ -33,11 +33,11 @@ The command shape is:
 colab-cli <space> <command> <flags>
 ```
 
-That is a little longer than `colab exec`, but it gives the command tree room to stay readable. The current public spaces are `session`, `run`, `fs`, `status`, `continue`, `slurp`, `fleet`, `ai`, `auth`, `settings`, and `completions`. I collapsed the older `exec`, `env`, `mount`, `runtime`, `tools`, `config`, and `doctor` spaces because they made users remember too many ways to ask the same question.
+That is a little longer than `colab exec`, but it gives the command tree room to stay readable. The default public spaces are `session`, `run`, `fs`, `status`, `ai`, `auth`, `settings`, and `completions`. Optional `continue` and `distribute` spaces stay hidden until enabled. I collapsed the older `exec`, `env`, `mount`, `runtime`, `tools`, `config`, and `doctor` spaces because they made users remember too many ways to ask the same question.
 
 I kept the Rust code as one internal `src/cocli/` module tree. The Rust Book's module guidance fits this better than a pile of small crates right now: group code by responsibility, keep details private, and extract later when a boundary is real. Cargo workspaces are useful, but they add release and versioning work. This project does not have a stable public API split yet.
 
-Slurp is a small TOML orchestration file, not a workflow platform. It should explain what will happen before it runs.
+Recipe files are small TOML workflow configs, not a workflow platform. They should explain what will happen before they run.
 
 Continuation is checkpoint/replay. It saves files, metadata, command state, artifacts, and pending steps. It does not move live Python memory between unrelated Colab runtimes.
 

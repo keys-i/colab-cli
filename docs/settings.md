@@ -6,7 +6,7 @@ Settings are local TOML. They live at:
 colab-cli settings path
 ```
 
-Show the current settings:
+Open the sectioned settings view:
 
 ```sh
 colab-cli settings
@@ -16,18 +16,18 @@ Set one key:
 
 ```sh
 colab-cli settings set ui.theme auto
-colab-cli settings set ui.animations false
-colab-cli settings ui set animations true
-colab-cli settings experiments set mcp-server true
+colab-cli settings ui set color always
+colab-cli settings ui set animations false
+colab-cli settings experiments set distribute true
 ```
 
-Preview the terminal colour roles:
+Preview terminal colour roles:
 
 ```sh
 colab-cli settings ui preview
 ```
 
-The important defaults are boring:
+Default shape:
 
 ```toml
 [ui]
@@ -52,10 +52,13 @@ timestamps = false
 enabled = true
 
 [experiments]
+continue_work = false
+distribute = false
 multi_login = false
 fleet = false
 mcp_server = false
 ai_plan_runner = false
+ast_observer = false
 slurp_automation = false
 background_live_checks = false
 
@@ -68,24 +71,51 @@ redact_tokens = true
 enabled = false
 ```
 
+## UI
+
+```sh
+colab-cli settings ui
+colab-cli settings ui get color
+colab-cli settings ui set color auto
+colab-cli settings ui set color always
+colab-cli settings ui set color never
+colab-cli settings ui set neon true
+colab-cli settings ui set unicode true
+```
+
+`--no-color` is still available as an emergency one-shot override. Normal colour mode belongs in settings.
+
 ## Experiments
 
-Experiments are off by default and are saved in `config.toml`.
+Experiments are off by default and saved in `config.toml`.
 
 ```sh
 colab-cli settings experiments
 colab-cli settings experiments get
-colab-cli settings experiments set fleet true
+colab-cli settings experiments get distribute
+colab-cli settings experiments set continue true
+colab-cli settings experiments set distribute true
+colab-cli settings experiments set ast-observer true
 colab-cli settings experiments reset
 ```
 
 Disabled experiments fail with:
 
 ```text
-experimental feature disabled
+experimental feature disabled: distribute
 enable: colab-cli settings experiments
 ```
 
-This currently gates multi-login profile workflows, fleet/distributed planning, MCP serving, AI plan running, Slurp automation, and background live checks.
+Experiment gates:
+
+| Experiment | Default | Gates | Note |
+|---|---:|---|---|
+| Continue | off | `continue` | Checkpoint/replay, not live memory transfer. |
+| Distribute | off | `distribute`, hidden `slurp`, hidden `fleet` | Recipes, pools, and shards. No quota bypass. |
+| Multi-login | off | distribute profile fallback | Locked unless Distribute is on. |
+| MCP server | off | `ai mcp` | Server is still a disabled placeholder unless implemented. |
+| AI plan runner | off | `ai plan`, `ai run` | `ai run` also requires `--confirm`. |
+| AST observer | off | `ai ast`, `ai code`, `run --ast` | Local read-only parser before execution. |
+| Background live checks | off | future live status checks | May touch network. |
 
 Private maintainer helpers are hidden under `settings dev` and documented only in [maintainer.md](maintainer.md).

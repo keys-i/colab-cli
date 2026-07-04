@@ -1,6 +1,6 @@
 # Feature Test Plan
 
-This file is the checklist for command coverage. Normal CI only runs offline tests. Live Colab tests are opt-in with `COLAB_CLI_LIVE=1`.
+Normal CI only runs offline tests. Live Colab tests are opt-in with `COLAB_CLI_LIVE=1`.
 
 ## Offline Tests
 
@@ -12,7 +12,8 @@ cargo test --workspace --all-features
 
 Coverage:
 
-- command tree parses production spaces
+- default command tree parses production spaces
+- optional spaces stay hidden until enabled
 - old aliases stay hidden
 - JSON output has no ANSI
 - Drive mount uses a kernel cell helper, not plain `python -c`
@@ -23,7 +24,7 @@ Coverage:
 
 ## CLI Parse And Help
 
-Production commands:
+Default production commands:
 
 - `session new`
 - `session list`
@@ -35,9 +36,9 @@ Production commands:
 - `run notebook`
 - `run shell`
 - `run repl`
-- `run install`
-- `run freeze`
-- `run restore`
+- `run pip install`
+- `run pip freeze`
+- `run pip restore`
 - `run last`
 - `run history`
 - `fs ls`
@@ -65,30 +66,13 @@ Production commands:
 - `status runtime --versions`
 - `status fs`
 - `status drive`
-- `status slurp`
-- `status fleet`
-- `continue save`
-- `continue inspect`
-- `continue last`
-- `continue resume --dry-run`
-- `continue export`
-- `continue import`
-- `continue clean`
-- `slurp init`
-- `slurp check`
-- `slurp plan`
-- `slurp explain`
-- `slurp run --dry-run`
-- `slurp resume --dry-run`
-- `fleet plan --dry-run`
-- `fleet plan --cost`
 - `ai`
 - `ai tools list`
 - `ai tools list --json`
-- `ai tools inspect slurp.plan`
-- `ai mcp`
-- `ai mcp serve --stdio`
-- `ai plan`
+- `ai tools inspect recipe.plan`
+- `ai ast`, gated
+- `ai mcp`, gated
+- `ai plan`, gated
 - `ai audit`
 - `auth list`
 - `auth status`
@@ -104,12 +88,29 @@ Production commands:
 - `settings experiments reset`
 - `settings skills list`
 - `settings skills list --json`
-- `settings skills inspect slurp.plan`
+- `settings skills inspect recipe.plan`
 - `settings ui get`
 - `settings ui set animations false`
 - `completions bash`
 - `completions zsh`
 - `completions fish`
+
+Experimental commands:
+
+- `continue save`
+- `continue inspect`
+- `continue last`
+- `continue resume --dry-run`
+- `continue resume --confirm`
+- `continue export`
+- `continue import`
+- `continue clean`
+- `distribute plan`
+- `distribute status`
+- `distribute recipe init`
+- `distribute recipe explain`
+- `distribute pool plan --cost`
+- `distribute shard plan`
 
 ## Hidden Migration Aliases
 
@@ -122,7 +123,10 @@ Keep for one cycle if they stay cheap:
 - `config path` -> `settings path`
 - `doctor` -> `status check`
 - `exec py` -> `run py`
-- `env install` -> `run install`
+- `env install` -> `run pip install`
+- `run install` -> `run pip install`
+- `slurp` -> `distribute recipe`
+- `fleet` -> `distribute pool`
 - `agent` -> `ai`
 - `bug-report` -> `settings support bug-report`
 
@@ -130,11 +134,11 @@ Aliases must not appear in normal help.
 
 ## Deferred Surfaces
 
-- `fleet status`
-- `fleet logs`
+- dynamic help that reveals enabled experiments
 - transport MCP server
+- exact Tree-sitter AST
 
-These stay out of production help or fail behind experiment gates until there is real behaviour behind them.
+These stay hidden, gated, or honest about not being implemented until there is real behaviour behind them.
 
 ## Live Smoke
 
