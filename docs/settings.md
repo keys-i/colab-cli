@@ -115,7 +115,7 @@ Experiment gates:
 | Multi-login | off | distribute profile fallback | Locked unless Distribute is on. |
 | MCP server | off | `ai mcp` | Server is still a disabled placeholder unless implemented. |
 | AI plan runner | off | `ai plan`, `ai run` | `ai run` also requires `--confirm`. |
-| AST observer | off | `ai ast`, `ai code`, `run --ast` | Local read-only parser before execution. |
+| AST observer | off | `run ast`, `run --ast`, `ai code` | Local read-only parser before execution. |
 | Background live checks | off | future live status checks | May touch network. |
 
 Private maintainer helpers are hidden under `settings dev` and documented only in [maintainer.md](maintainer.md).

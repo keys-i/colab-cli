@@ -13,10 +13,25 @@ fn parses_major_command_spaces() {
         ["colab-cli", "run", "pip", "install", "torch"].as_slice(),
         ["colab-cli", "run", "pip", "freeze"].as_slice(),
         ["colab-cli", "run", "pip", "restore", "requirements.txt"].as_slice(),
+        ["colab-cli", "run", "pip", "check"].as_slice(),
+        ["colab-cli", "run", "pip", "list"].as_slice(),
+        ["colab-cli", "run", "ast", "file.py"].as_slice(),
+        ["colab-cli", "run", "watch", "file.py", "--ast"].as_slice(),
         ["colab-cli", "run", "install", "torch"].as_slice(),
         ["colab-cli", "fs", "changed", ".", "/content"].as_slice(),
         ["colab-cli", "fs", "drive", "mount"].as_slice(),
         ["colab-cli", "fs", "drive", "mount", "--timeout", "180"].as_slice(),
+        [
+            "colab-cli",
+            "fs",
+            "drive",
+            "mount",
+            "--preflight-timeout",
+            "10",
+            "--retries",
+            "2",
+        ]
+        .as_slice(),
         ["colab-cli", "fs", "drive", "status"].as_slice(),
         ["colab-cli", "fs", "drive", "list"].as_slice(),
         ["colab-cli", "status", "runtime", "--gpu"].as_slice(),
@@ -24,6 +39,7 @@ fn parses_major_command_spaces() {
         ["colab-cli", "status", "runtime", "--versions"].as_slice(),
         ["colab-cli", "status", "runtime", "--backend"].as_slice(),
         ["colab-cli", "status", "check"].as_slice(),
+        ["colab-cli", "status", "version"].as_slice(),
         ["colab-cli", "distribute", "plan"].as_slice(),
         ["colab-cli", "distribute", "recipe", "explain"].as_slice(),
         ["colab-cli", "distribute", "pool", "plan"].as_slice(),
@@ -49,6 +65,11 @@ fn parses_major_command_spaces() {
         .as_slice(),
         ["colab-cli", "settings", "experiments", "reset"].as_slice(),
         ["colab-cli", "settings", "support", "bug-report"].as_slice(),
+        ["colab-cli", "settings", "about"].as_slice(),
+        ["colab-cli", "settings", "update", "check"].as_slice(),
+        ["colab-cli", "settings", "update", "install", "--yes"].as_slice(),
+        ["colab-cli", "settings", "billing", "open", "--dry-run"].as_slice(),
+        ["colab-cli", "settings", "billing", "status"].as_slice(),
         ["colab-cli", "ai"].as_slice(),
         ["colab-cli", "ai", "tools"].as_slice(),
         ["colab-cli", "ai", "tools", "list"].as_slice(),
@@ -60,6 +81,16 @@ fn parses_major_command_spaces() {
         ["colab-cli", "ai", "plan", "train a model"].as_slice(),
         ["colab-cli", "ai", "audit", "plan.toml"].as_slice(),
         ["colab-cli", "continue", "last"].as_slice(),
+        ["colab-cli", "auth", "login", "--method", "adc"].as_slice(),
+        ["colab-cli", "auth", "login", "--method", "oauth2"].as_slice(),
+        ["colab-cli", "auth", "status"].as_slice(),
+        ["colab-cli", "auth", "list"].as_slice(),
+        ["colab-cli", "session", "refresh"].as_slice(),
+        ["colab-cli", "session", "repair"].as_slice(),
+        ["colab-cli", "session", "reconnect"].as_slice(),
+        ["colab-cli", "session", "logs", "--tail", "50"].as_slice(),
+        ["colab-cli", "session", "kernel", "status"].as_slice(),
+        ["colab-cli", "session", "kernel", "restart", "--yes"].as_slice(),
         ["colab-cli", "settings", "path"].as_slice(),
         ["colab-cli", "settings", "locate"].as_slice(),
     ] {
@@ -115,6 +146,7 @@ fn hidden_aliases_parse_for_one_cycle() {
         ["colab-cli", "env", "install", "torch"].as_slice(),
         ["colab-cli", "exec", "py", "--code", "print(1)"].as_slice(),
         ["colab-cli", "mount", "drive"].as_slice(),
+        ["colab-cli", "log"].as_slice(),
     ] {
         Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
     }
@@ -176,6 +208,11 @@ fn docs_exist() {
         "docs/maintainer.md",
         "docs/feature-test-plan.md",
         "docs/live-testing.md",
+        "docs/google-colab-cli-map.md",
+        "docs/colabtools-feature-map.md",
+        "docs/auth.md",
+        "docs/logs.md",
+        "docs/run.md",
         "plan.md",
     ] {
         assert!(std::path::Path::new(path).exists(), "{path}");
@@ -238,6 +275,7 @@ fn settings_skills_json_has_stable_fields() {
     assert!(first.get("scope").is_some());
     assert!(first.get("risk").is_some());
     assert!(first.get("needs_session").is_some());
+    assert!(first.get("state").is_some());
 }
 
 #[test]
@@ -255,6 +293,8 @@ fn settings_default_renders_sections() {
     assert!(stdout.contains("UI"));
     assert!(stdout.contains("Experiments"));
     assert!(stdout.contains("AI"));
+    assert!(stdout.contains("Auth"));
+    assert!(stdout.contains("Billing"));
     assert!(!stdout.contains("Dev"));
     assert!(!stdout.contains("Quick Actions"));
     assert!(!stdout.trim_start().starts_with('{'));
@@ -347,11 +387,15 @@ fn ai_tools_list_is_agent_catalog() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("AI tools"));
-    assert!(stdout.contains("Agent-friendly workflows"));
+    assert!(stdout.contains("Agent-facing workflows"));
     assert!(stdout.contains("recipe.plan"));
     assert!(stdout.contains("distribute.plan"));
+    assert!(stdout.contains("fs.changed"));
     assert!(stdout.contains("ast.outline"));
     assert!(stdout.contains("mcp.tools"));
+    assert!(stdout.contains("State"));
+    assert!(stdout.contains("gated"));
+    assert!(stdout.contains("off"));
     assert!(!stdout.contains("continue.resume"));
     assert!(!stdout.contains("session.new"));
     assert!(!stdout.contains("session=false"));
@@ -385,7 +429,7 @@ fn optional_commands_are_experiment_gated() {
     for args in [
         ["distribute", "plan"].as_slice(),
         ["continue", "last"].as_slice(),
-        ["ai", "ast", "Cargo.toml"].as_slice(),
+        ["run", "ast", "Cargo.toml"].as_slice(),
     ] {
         let out = bin().env("HOME", home.path()).args(args).output().unwrap();
         assert!(!out.status.success(), "{args:?}");
@@ -433,7 +477,7 @@ fn enabled_distribute_status_and_ast_outline_work() {
     );
     let ast = bin()
         .env("HOME", home.path())
-        .args(["ai", "ast", sample.to_str().unwrap(), "--json"])
+        .args(["run", "ast", sample.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
     assert!(ast.status.success());

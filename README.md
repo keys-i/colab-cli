@@ -45,7 +45,7 @@ Commands:
   status       State, health, and runtime info
   ai           Agent, MCP, and code tools
   auth         Google account profiles
-  settings     Config, experiments, support, and UI
+  settings     Config, experiments, support, billing, and UI
   completions  Generate shell completions
 
 Options:
@@ -102,7 +102,7 @@ colab-cli status runtime --backend
 colab-cli status runtime --fit llama-7b
 
 colab-cli ai tools list
-colab-cli ai ast file.py
+colab-cli run ast file.py
 colab-cli ai code deps file.py
 colab-cli settings experiments
 ```
@@ -168,9 +168,13 @@ cargo doc --no-deps
 
 - [Commands](docs/commands.md)
 - [Settings](docs/settings.md)
+- [Auth](docs/auth.md)
+- [Run](docs/run.md)
+- [Logs](docs/logs.md)
 - [AI](docs/ai.md)
 - [AST observer](docs/ast-observer.md)
 - [Distribute](docs/distribute.md)
+- [Google Colab CLI map](docs/google-colab-cli-map.md)
 - [Colabtools feature map](docs/colabtools-feature-map.md)
 - [Command audit](docs/command-audit.md)
 - [Prune and merge report](docs/prune-and-merge-report.md)

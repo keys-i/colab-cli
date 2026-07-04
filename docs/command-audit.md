@@ -29,6 +29,13 @@ continue, distribute, slurp, fleet, release, agent, doctor, config, tools, runti
 | `colab-cli mount list` | `colab-cli fs drive status` | yes | Users want Drive state, not a generic mount dump. |
 | `colab-cli runtime info` | `colab-cli status runtime` | yes | Runtime reads belong under status. |
 | `colab-cli runtime gpu` | `colab-cli status runtime --gpu` | yes | Same read-only question. |
+| `colab-cli restart-kernel` | `colab-cli session kernel restart --yes` | no public alias | Kernel control belongs under session and requires confirmation. |
+| `colab-cli log` | `colab-cli session logs` | yes | Logs belong to a session. |
+| `colab-cli pay` | `colab-cli settings billing open` | no public alias | Billing helpers belong under settings. |
+| `colab-cli version` | `colab-cli status version` or `colab-cli --version` | no public alias | Version is status/about information. |
+| `colab-cli update` | `colab-cli settings update check` | no public alias | Updates are local settings/about maintenance. |
+| `colab-cli drivemount` | `colab-cli fs drive mount` | no public alias | Drive is filesystem work. |
+| `colab-cli install` | `colab-cli run pip install` | no public alias | Package setup belongs under `run pip`. |
 | `colab-cli tools list` | `colab-cli ai tools list` | yes | Agent/tool surfaces belong under AI. |
 | `colab-cli tools inspect` | `colab-cli ai tools inspect` | yes | Same metadata. |
 | `colab-cli agent ...` | `colab-cli ai ...` | yes | One public agent-facing command space. |
@@ -37,6 +44,7 @@ continue, distribute, slurp, fleet, release, agent, doctor, config, tools, runti
 | `colab-cli session status` | `colab-cli status session` | yes | Session status should not live in two visible places. |
 | `colab-cli slurp ...` | `colab-cli distribute recipe ...` | yes | Recipe workflow now lives under distribute. |
 | `colab-cli fleet ...` | `colab-cli distribute pool ...` | yes | Pool planning now lives under distribute. |
+| `colab-cli ai ast ...` | `colab-cli run ast ...` | hidden compatibility only | AST is an execution/run aid, not the primary AI command. |
 | `colab-cli continue ...` | `colab-cli continue ...` after experiment enable | n/a | Useful but optional checkpoint/replay feature. |
 | `colab-cli release ...` | `colab-cli settings dev release ...` | no public alias | Private maintainer helper behind feature-gated dev tools. |
 | snake_case skill names | dotted tool names | internal alias only | Human output never shows old raw names. |

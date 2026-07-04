@@ -9,6 +9,7 @@ use tokio_tungstenite::tungstenite;
 
 use crate::cocli::error::{ColabError, Result};
 use crate::cocli::session::client::ColabClient;
+use crate::cocli::session::model::Session;
 use crate::cocli::session::store::StoredServer;
 
 // async refresher used by long-running shells to rotate the proxy token.
@@ -62,6 +63,16 @@ pub async fn execute_colab_cell(
             None,
         ));
     };
+    execute_colab_cell_in_session(client, server, session, code, timeout).await
+}
+
+pub async fn execute_colab_cell_in_session(
+    _client: &ColabClient,
+    server: &StoredServer,
+    session: &Session,
+    code: &str,
+    timeout: std::time::Duration,
+) -> Result<CellOutput> {
     let kernel_id = session
         .kernel
         .as_ref()

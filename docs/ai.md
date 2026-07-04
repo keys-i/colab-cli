@@ -5,8 +5,6 @@
 ```sh
 colab-cli ai tools list
 colab-cli ai tools inspect recipe.plan
-colab-cli ai ast file.py
-colab-cli ai ast watch file.py
 colab-cli ai code explain file.py
 colab-cli ai code deps file.py
 colab-cli ai plan "prepare a local review plan"
@@ -16,6 +14,14 @@ colab-cli ai run plan.toml --confirm
 ```
 
 `ai tools list` is read-only and available by default. It lists optional tool surfaces such as `recipe.plan`, `distribute.plan`, `fs.diff`, `ast.outline`, `mcp.tools`, and `ai.audit`.
+
+AST observation is shown through `run`:
+
+```sh
+colab-cli run ast file.py
+colab-cli run watch file.py --ast
+colab-cli run script file.py --ast --session trainer
+```
 
 Execution is gated:
 

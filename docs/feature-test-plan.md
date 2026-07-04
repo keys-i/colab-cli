@@ -70,7 +70,7 @@ Default production commands:
 - `ai tools list`
 - `ai tools list --json`
 - `ai tools inspect recipe.plan`
-- `ai ast`, gated
+- `run ast`, gated
 - `ai mcp`, gated
 - `ai plan`, gated
 - `ai audit`

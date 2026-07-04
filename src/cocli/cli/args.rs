@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
     version,
     disable_help_subcommand = true,
     override_usage = "colab-cli [OPTIONS] <COMMAND>",
-    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  ai           Agent, MCP, and code tools\n  auth         Google account profiles\n  settings     Config, experiments, support, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
+    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  ai           Agent, MCP, and code tools\n  auth         Google account profiles\n  settings     Config, experiments, support, billing, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
 )]
 pub struct Cli {
     #[arg(long, short, global = true, env = "COLAB_QUIET")]
@@ -104,7 +104,7 @@ pub enum Commands {
         #[command(subcommand)]
         command: AuthCommands,
     },
-    /// Config, skills, support, and UI
+    /// Config, experiments, support, billing, and UI
     #[command(display_order = 90)]
     Settings {
         #[command(subcommand)]
@@ -198,6 +198,9 @@ pub enum Commands {
     /// Compatibility: `colab download`.
     #[command(name = "download", hide = true)]
     CompatDownload(CompatTransferArgs),
+    /// Compatibility: `log` moved to `session logs`.
+    #[command(name = "log", hide = true)]
+    CompatLog(SessionLogsArgs),
 }
 
 #[derive(clap::Args)]
@@ -237,9 +240,14 @@ pub struct SessionNewArgs {
 #[derive(Subcommand)]
 pub enum AuthCommands {
     /// Sign in to Google (opens browser)
-    Login,
+    Login {
+        #[arg(long, default_value = "oauth2", value_parser = ["oauth2", "adc"])]
+        method: String,
+    },
     /// Sign out and clear stored credentials
-    Logout,
+    Logout {
+        profile: Option<String>,
+    },
     Add(AuthProfileArgs),
     List {
         #[arg(long)]
@@ -247,7 +255,7 @@ pub enum AuthCommands {
     },
     Status {
         #[arg(long)]
-        name: String,
+        name: Option<String>,
         #[arg(long)]
         show_private: bool,
     },
@@ -305,6 +313,43 @@ pub enum SessionCommands {
     },
     /// Show the last assigned session
     Last,
+    /// Refresh known sessions and endpoints
+    Refresh,
+    /// Check whether the selected session looks stale
+    Repair(SessionNameArg),
+    /// Try to reconnect a local session name to an active runtime
+    Reconnect(SessionNameArg),
+    /// Show captured session logs where available
+    Logs(SessionLogsArgs),
+    /// Kernel controls
+    Kernel {
+        #[command(subcommand)]
+        command: SessionKernelCommands,
+    },
+}
+
+#[derive(clap::Args)]
+pub struct SessionLogsArgs {
+    #[arg(long, short = 's', alias = "name")]
+    pub session: Option<String>,
+    #[arg(long, default_value_t = 50)]
+    pub tail: usize,
+    #[arg(long, default_value = "text", value_parser = ["text", "md", "ipynb", "jsonl"])]
+    pub format: String,
+    #[arg(long)]
+    pub out: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum SessionKernelCommands {
+    Status(SessionNameArg),
+    Interrupt(SessionNameArg),
+    Restart {
+        #[arg(long, short = 's', alias = "name")]
+        session: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -352,6 +397,22 @@ pub enum RunCommands {
     Pip {
         #[command(subcommand)]
         command: PipCommands,
+    },
+    /// Show a local code outline before execution
+    Ast {
+        file: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Watch a local script path before running it
+    Watch {
+        script: String,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(long)]
+        ast: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Compatibility: moved to `run pip install`.
     #[command(hide = true)]
@@ -525,6 +586,12 @@ pub enum FsDriveCommands {
         dry_run: bool,
         #[arg(long, default_value_t = 180)]
         timeout: u64,
+        #[arg(long, default_value_t = 10)]
+        preflight_timeout: u64,
+        #[arg(long, default_value_t = 2)]
+        retries: u8,
+        #[arg(long)]
+        no_retry: bool,
         #[arg(long)]
         open: bool,
     },
@@ -596,6 +663,12 @@ pub enum MountCommands {
         path: String,
         #[arg(long, default_value_t = 120)]
         timeout: u64,
+        #[arg(long, default_value_t = 10)]
+        preflight_timeout: u64,
+        #[arg(long, default_value_t = 2)]
+        retries: u8,
+        #[arg(long)]
+        no_retry: bool,
         #[arg(long)]
         open: bool,
         #[arg(long)]
@@ -694,6 +767,8 @@ pub enum StatusCommands {
     Run,
     /// Show config/cache paths
     Paths,
+    /// Show build and config version information
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -747,6 +822,15 @@ pub enum SettingsCommands {
     Support {
         #[command(subcommand)]
         command: SupportCommands,
+    },
+    About,
+    Update {
+        #[command(subcommand)]
+        command: SettingsUpdateCommands,
+    },
+    Billing {
+        #[command(subcommand)]
+        command: SettingsBillingCommands,
     },
     #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
     #[command(hide = true)]
@@ -825,6 +909,24 @@ pub enum SupportCommands {
     Bundle,
 }
 
+#[derive(Subcommand)]
+pub enum SettingsUpdateCommands {
+    Check,
+    Install {
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SettingsBillingCommands {
+    Open {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Status,
+}
+
 #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 #[derive(Subcommand)]
 pub enum DevCommands {
@@ -889,6 +991,7 @@ pub enum AiCommands {
         #[arg(long)]
         confirm: bool,
     },
+    #[command(hide = true)]
     Ast {
         first: String,
         second: Option<String>,
@@ -1342,9 +1445,39 @@ mod tests {
     #[test]
     fn new_followup_spaces_parse() {
         assert!(Cli::try_parse_from(["colab-cli", "run", "pip", "install", "torch"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "run", "pip", "check"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "run", "pip", "list"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "run", "ast", "file.py"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "run", "watch", "file.py", "--ast"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "run", "install", "torch"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "auth", "login", "--method", "adc"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "auth", "login", "--method", "oauth2"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "auth", "status"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "auth", "list"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "session", "refresh"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "session", "repair"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "session", "reconnect"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "session", "logs", "--tail", "20"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "session", "kernel", "status"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["colab-cli", "session", "kernel", "restart", "--yes"]).is_ok()
+        );
         assert!(Cli::try_parse_from(["colab-cli", "status", "runtime", "--gpu"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "status", "version"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "fs", "drive", "mount"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "colab-cli",
+                "fs",
+                "drive",
+                "mount",
+                "--preflight-timeout",
+                "10",
+                "--retries",
+                "2"
+            ])
+            .is_ok()
+        );
         assert!(
             Cli::try_parse_from([
                 "colab-cli",
@@ -1363,6 +1496,11 @@ mod tests {
                 .is_ok()
         );
         assert!(Cli::try_parse_from(["colab-cli", "settings", "experiments"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "settings", "about"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "settings", "update", "check"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["colab-cli", "settings", "billing", "open", "--dry-run"]).is_ok()
+        );
         assert!(Cli::try_parse_from(["colab-cli", "settings", "experiments", "get"]).is_ok());
         assert!(
             Cli::try_parse_from([

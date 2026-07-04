@@ -4,8 +4,9 @@ The AST observer is experimental and off by default.
 
 ```sh
 colab-cli settings experiments set ast-observer true
-colab-cli ai ast file.py
-colab-cli ai ast watch file.py
+colab-cli run ast file.py
+colab-cli run ast notebook.ipynb
+colab-cli run watch file.py --ast
 colab-cli ai code explain file.py
 colab-cli ai code deps file.py
 colab-cli run script file.py --ast --session work

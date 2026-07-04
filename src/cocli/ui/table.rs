@@ -5,10 +5,10 @@ pub fn render_table(headers: &[&str], rows: &[Vec<String>], max_width: usize) ->
         return String::new();
     }
     let cols = headers.len();
-    let mut widths: Vec<usize> = headers.iter().map(|h| h.chars().count()).collect();
+    let mut widths: Vec<usize> = headers.iter().map(|h| visible_width(h)).collect();
     for row in rows {
         for (idx, value) in row.iter().take(cols).enumerate() {
-            widths[idx] = widths[idx].max(value.chars().count());
+            widths[idx] = widths[idx].max(visible_width(value));
         }
     }
 
@@ -27,6 +27,7 @@ pub fn render_table(headers: &[&str], rows: &[Vec<String>], max_width: usize) ->
 
     let mut out = String::new();
     write_row(&mut out, headers.iter().copied(), &widths);
+    write_separator(&mut out, &widths);
     for row in rows {
         write_row(&mut out, row.iter().map(String::as_str), &widths);
     }
@@ -40,14 +41,56 @@ fn write_row<'a>(out: &mut String, cells: impl Iterator<Item = &'a str>, widths:
             out.push_str("  ");
         }
         let cell = cells.get(idx).copied().unwrap_or_default();
-        let value = if idx + 1 == widths.len() {
-            truncate_end(cell, *width)
-        } else {
-            truncate_middle(cell, *width)
-        };
-        out.push_str(&format!("{value:<width$}"));
+        let value = truncate_cell(cell, *width, idx + 1 == widths.len());
+        out.push_str(&value);
+        let pad = width.saturating_sub(visible_width(&value));
+        out.push_str(&" ".repeat(pad));
     }
     out.push('\n');
+}
+
+fn write_separator(out: &mut String, widths: &[usize]) {
+    for (idx, width) in widths.iter().enumerate() {
+        if idx > 0 {
+            out.push_str("  ");
+        }
+        out.push_str(&"-".repeat(*width));
+    }
+    out.push('\n');
+}
+
+fn truncate_cell(cell: &str, width: usize, end: bool) -> String {
+    if visible_width(cell) <= width {
+        return cell.to_string();
+    }
+    let plain = strip_ansi(cell);
+    if end {
+        truncate_end(&plain, width)
+    } else {
+        truncate_middle(&plain, width)
+    }
+}
+
+fn visible_width(value: &str) -> usize {
+    strip_ansi(value).chars().count()
+}
+
+fn strip_ansi(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -65,5 +108,13 @@ mod tests {
             let table = render_table(&["Endpoint", "State", "Summary"], &rows, width);
             assert!(table.lines().all(|line| line.chars().count() <= width));
         }
+    }
+
+    #[test]
+    fn renders_ansi_without_width_bloat() {
+        let rows = vec![vec!["\x1b[32mready\x1b[0m".to_string(), "ok".to_string()]];
+        let table = render_table(&["State", "Summary"], &rows, 20);
+        assert!(table.lines().all(|line| line.chars().count() <= 32));
+        assert!(!table.contains('\t'));
     }
 }

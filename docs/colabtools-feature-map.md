@@ -19,7 +19,7 @@ Reference checked: `googlecolab/colabtools` local checkout under `colabtools/`. 
 | data tables/quick charts/autoviz | `ai code deps`, future explain-only helpers | deferred | Useful terminal equivalent would be static inspection, not browser rendering. |
 | BigQuery/Sheets helpers | future explicit cloud commands | deferred | Needs separate auth/scopes and should not be hidden behind Colab session commands. |
 | resource monitor | `status runtime --all`, future live checks | partial | Cheap local status stays default; live checks are experimental. |
-| Colab AI/code assistance concepts | `ai plan`, `ai audit`, `ai ast`, `ai code` | implemented/gated | Inspectable local tools only; no hidden model calls. |
+| Colab AI/code assistance concepts | `run ast`, `ai plan`, `ai audit`, `ai code` | implemented/gated | Inspectable local tools only; no hidden model calls. |
 | `_message.blocking_request` kernel channel | Drive/status kernel operations | wrapped through kernel cell | Normal errors are mapped; raw tracebacks appear only with `--verbose`. |
 | import hooks/magics | none | not CLI-appropriate | Colab notebook import behavior should not be copied into the terminal. |
 | HTML/background server helpers | none | not CLI-appropriate | These are notebook display/browser features. |
@@ -28,7 +28,7 @@ Implemented missing useful equivalents in this pass:
 
 - Drive mount/status progress and friendly errors
 - `run pip ...` package surface
-- local AST/code observer
+- local AST/code observer under `run`
 - `distribute` recipe/pool/shard surface, gated
 - redacted settings/support surfaces
 

@@ -4,11 +4,44 @@ Drive lives under `fs` because it changes the runtime filesystem.
 
 ```sh
 colab-cli fs drive mount --session trainer
+colab-cli fs drive mount --session trainer --timeout 180 --preflight-timeout 10 --retries 2
 colab-cli fs drive status --session trainer
 colab-cli fs drive list --session trainer
 colab-cli fs drive unmount --session trainer
 colab-cli fs drive path --session trainer
 ```
+
+## Mount Flow
+
+`fs drive mount` is staged:
+
+1. load selected session
+2. validate endpoint URL
+3. check endpoint reachability
+4. check Jupyter sessions
+5. find a kernel
+6. check existing Drive mount
+7. verify kernel context
+8. request Drive mount
+9. wait for browser approval if needed
+10. verify `/content/drive`
+
+If the endpoint is unreachable, cocli stops before kernel checks:
+
+```text
+Drive mount failed
+
+Runtime endpoint is not reachable
+stage: check_jupyter_sessions
+retryable: yes
+
+fix: colab-cli session list --refresh
+     colab-cli session new --name work
+
+Use --verbose to see the request details
+```
+
+Human mode strips raw reqwest/HTML/traceback walls. `--verbose` keeps trimmed request details. `--json` returns structured error fields and no ANSI.
 
 ## Kernel Requirement
 
@@ -25,8 +58,12 @@ print(hasattr(ip, "kernel"))
 If that check fails, the command prints:
 
 ```text
+Drive mount failed
+
 Drive mount needs a Colab kernel session, not a plain Python process
-next: colab-cli session url --open
+stage: verify_kernel_context
+
+fix: colab-cli session url --open
 ```
 
 Open the session URL once, approve Drive in the browser if Colab asks, then run the mount command again.
@@ -56,4 +93,13 @@ Verbose mode can show the raw traceback when it is needed for debugging:
 colab-cli --verbose fs drive mount --session trainer
 ```
 
-JSON mode uses structured fields and no ANSI codes.
+## Recovery Commands
+
+```sh
+colab-cli session refresh
+colab-cli session repair --session trainer
+colab-cli session reconnect --session trainer
+colab-cli session last
+```
+
+These commands help detect stale local endpoint records. They do not create hidden runtimes or bypass Colab limits.

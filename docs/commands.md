@@ -34,6 +34,7 @@ colab-cli run notebook report.ipynb --session trainer --out report.out.ipynb
 colab-cli run notebook report.ipynb --ast --session trainer
 colab-cli run repl --session trainer
 colab-cli run shell --session trainer
+colab-cli run ast train.py
 colab-cli run pip install torch transformers --session trainer
 colab-cli run pip install -r requirements.txt --session trainer
 colab-cli run pip freeze --session trainer
@@ -90,6 +91,7 @@ colab-cli status fs
 colab-cli status drive
 colab-cli status run
 colab-cli status paths
+colab-cli status version
 ```
 
 `status` is a cheap local check by default. It prints one `fix:` line only when something needs attention.
@@ -164,8 +166,6 @@ Distribute must not bypass Colab rules or quotas. Multi-login is locked unless d
 colab-cli ai
 colab-cli ai tools list
 colab-cli ai tools inspect recipe.plan
-colab-cli ai ast file.py
-colab-cli ai ast watch file.py
 colab-cli ai code explain file.py
 colab-cli ai code deps file.py
 colab-cli ai plan "summarise a workflow"
@@ -176,7 +176,7 @@ colab-cli ai mcp
 colab-cli ai mcp serve --stdio
 ```
 
-`ai tools list` is read-only and available by default. AST, MCP serving, plan drafting, and `ai run` are disabled until enabled under `settings experiments`. Plans are inspectable and do not execute hidden Colab work.
+`ai tools list` is read-only and available by default. AST is shown under `run ast` and `run script --ast`. MCP serving, plan drafting, and `ai run` are disabled until enabled under `settings experiments`. Plans are inspectable and do not execute hidden Colab work.
 
 ## Settings
 
@@ -199,6 +199,11 @@ colab-cli settings skills list
 colab-cli settings skills inspect recipe.plan
 colab-cli settings skills run recipe.plan --json-input '{}'
 colab-cli settings support bug-report
+colab-cli settings about
+colab-cli settings update check
+colab-cli settings update install --yes
+colab-cli settings billing open
+colab-cli settings billing status
 ```
 
 Skills and AI tools are optional agent/tool surfaces. Core work stays in normal commands.

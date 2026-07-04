@@ -12,9 +12,11 @@ use crate::cocli::cli::{
     DistributeCommands, DistributePoolCommands, DistributeRecipeCommands, DistributeRunArgs,
     DistributeShardCommands, EnvCommands, ExecCommands, FileCommands, FleetCommands,
     FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, MountCommands,
-    PipCommands, RunCommands, RuntimeCommands, ServerCommands, SessionCommands, SessionNameArg,
-    SessionNewArgs, SettingsCommands, SettingsExperimentsCommands, SettingsUiCommands,
-    SkillCommands, SlurpCommands, StatusCommands, SupportCommands, ToolsCommands,
+    PipCommands, RunCommands, RuntimeCommands, ServerCommands, SessionCommands,
+    SessionKernelCommands, SessionLogsArgs, SessionNameArg, SessionNewArgs,
+    SettingsBillingCommands, SettingsCommands, SettingsExperimentsCommands, SettingsUiCommands,
+    SettingsUpdateCommands, SkillCommands, SlurpCommands, StatusCommands, SupportCommands,
+    ToolsCommands,
 };
 #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 use crate::cocli::cli::{DevCommands, ReleaseCommands};
@@ -23,7 +25,7 @@ use crate::cocli::error::{ColabError, Result};
 use crate::cocli::exec::runner;
 use crate::cocli::session::ServerManager;
 use crate::cocli::session::client::ColabClient;
-use crate::cocli::session::model::{Shape, Variant};
+use crate::cocli::session::model::{Session, Shape, Variant};
 use crate::cocli::session::store::StoredServer;
 use crate::cocli::ui::Ui;
 
@@ -97,18 +99,16 @@ fn print_error_json(e: &ColabError, verbose: bool) {
             }
             value
         }
-        ColabError::Drive {
-            kind,
-            message,
-            next_action,
-            raw,
-        } => {
+        ColabError::Drive(drive) => {
             let mut value = serde_json::json!({
-                "kind": kind,
-                "message": message,
-                "next_action": next_action,
+                "kind": drive.kind,
+                "message": drive.message,
+                "next_action": drive.next_action,
+                "stage": drive.stage,
+                "retryable": drive.retryable,
+                "fix": drive.fixes,
             });
-            if verbose && let Some(raw) = raw {
+            if verbose && let Some(raw) = &drive.raw {
                 value["raw"] = serde_json::Value::String(raw.clone());
             }
             value
@@ -161,15 +161,29 @@ fn print_human_error(e: &ColabError, verbose: bool, ui: Ui) {
                 eprintln!("Use --verbose to see the server body");
             }
         }
-        ColabError::Drive {
-            next_action, raw, ..
-        } => {
-            ui.error(&e.to_string());
-            if let Some(next) = next_action {
+        ColabError::Drive(drive) => {
+            eprintln!("Drive mount failed");
+            eprintln!();
+            eprintln!("{}", drive.message);
+            if let Some(stage) = &drive.stage {
+                eprintln!("stage: {stage}");
+            }
+            eprintln!("retryable: {}", yes_no(drive.retryable));
+            if !drive.fixes.is_empty() {
+                eprintln!();
+                eprintln!("fix: {}", drive.fixes[0]);
+                for fix in drive.fixes.iter().skip(1) {
+                    eprintln!("     {fix}");
+                }
+            } else if let Some(next) = &drive.next_action {
+                eprintln!();
                 eprintln!("fix: {next}");
             }
-            if verbose && let Some(raw) = raw {
+            if verbose && let Some(raw) = &drive.raw {
                 eprintln!("\n{}", trim_raw(raw));
+            } else if drive.raw.is_some() {
+                eprintln!();
+                eprintln!("Use --verbose to see the request details");
             }
         }
         ColabError::Config(message) => eprintln!("{message}"),
@@ -189,7 +203,7 @@ fn error_kind(e: &ColabError) -> &'static str {
         ColabError::ApiError { .. } => "api_error",
         ColabError::ParseError(_) => "parse_error",
         ColabError::Config(_) => "config_error",
-        ColabError::Drive { .. } => "drive_error",
+        ColabError::Drive(_) => "drive_error",
         ColabError::Io(_) => "io_error",
         ColabError::Network(_) => "network_error",
         ColabError::Json(_) => "json_error",
@@ -429,19 +443,41 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             let config = ColabConfig::load(cli.quiet)?;
             compat_transfer(args, false, &config, ui).await
         }
+        Some(Commands::CompatLog(args)) => {
+            migration(&ui, "colab-cli session logs");
+            let config = ColabConfig::load(cli.quiet)?;
+            handle_session_logs(&config, ui, args).await
+        }
         Some(Commands::Completions { .. }) => unreachable!(),
     }
 }
 
 async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
     match cmd {
-        AuthCommands::Login => {
+        AuthCommands::Login { method } if method == "adc" => handle_auth_adc_login(ui, json),
+        AuthCommands::Login { .. } => {
             let config = ColabConfig::load(ui.quiet)?;
             handle_login(&config, ui).await
         }
-        AuthCommands::Logout => {
+        AuthCommands::Logout { profile: None } => {
             auth::logout()?;
             ui.success("Signed out. Credentials cleared.");
+            Ok(())
+        }
+        AuthCommands::Logout {
+            profile: Some(name),
+        } => {
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
+            let mut store = load_auth_profiles()?;
+            if !store.remove(&name) {
+                return Err(ColabError::config(format!(
+                    "auth profile not found: {name}"
+                )));
+            }
+            save_auth_profiles(&store)?;
+            ui.success(&format!("removed auth profile: {name}"));
             Ok(())
         }
         AuthCommands::Add(args) => {
@@ -451,29 +487,54 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             handle_auth_add(args, ui)
         }
         AuthCommands::List { show_private } => {
-            require_experiment("multi-login", |cfg| {
-                cfg.experiments.distribute && cfg.experiments.multi_login
-            })?;
-            let store = load_auth_profiles()?;
-            let out: Vec<_> = store
-                .profiles
-                .iter()
-                .map(|p| redacted_profile(p, show_private))
-                .collect();
+            let store = load_auth_profiles().ok();
+            let profiles: Vec<_> = store
+                .as_ref()
+                .map(|store| {
+                    store
+                        .profiles
+                        .iter()
+                        .map(|p| redacted_profile(p, show_private))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let current = auth::current_account()?.map(|account| {
+                crate::cocli::auth::redaction::redacted_email(&account.email, show_private)
+            });
             print_value(
                 json,
-                &serde_json::json!({ "active": store.active, "profiles": out }),
+                &serde_json::json!({
+                    "current": current,
+                    "active": store.as_ref().and_then(|s| s.active.clone()),
+                    "profiles": profiles
+                }),
             )
         }
         AuthCommands::Status { name, show_private } => {
-            require_experiment("multi-login", |cfg| {
-                cfg.experiments.distribute && cfg.experiments.multi_login
-            })?;
-            let store = load_auth_profiles()?;
-            let profile = store
-                .get(&name)
-                .ok_or_else(|| ColabError::config(format!("auth profile not found: {name}")))?;
-            print_value(json, &redacted_profile(profile, show_private))
+            if let Some(name) = name {
+                require_experiment("multi-login", |cfg| {
+                    cfg.experiments.distribute && cfg.experiments.multi_login
+                })?;
+                let store = load_auth_profiles()?;
+                let profile = store
+                    .get(&name)
+                    .ok_or_else(|| ColabError::config(format!("auth profile not found: {name}")))?;
+                print_value(json, &redacted_profile(profile, show_private))
+            } else {
+                let current = auth::current_account()?.map(|account| {
+                    crate::cocli::auth::redaction::redacted_email(&account.email, show_private)
+                });
+                let adc_path = adc_credentials_path();
+                print_value(
+                    json,
+                    &serde_json::json!({
+                        "signed_in": current.is_some(),
+                        "account": current,
+                        "adc_available": adc_path.as_ref().is_some_and(|p| p.exists()),
+                        "adc_path": adc_path.map(|p| p.display().to_string()),
+                    }),
+                )
+            }
         }
         AuthCommands::Use {
             name,
@@ -573,6 +634,39 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
     }
 }
 
+fn handle_auth_adc_login(ui: Ui, json: bool) -> Result<()> {
+    let path = adc_credentials_path();
+    let available = path.as_ref().is_some_and(|path| path.exists());
+    if json {
+        return print_value(
+            true,
+            &serde_json::json!({
+                "method": "adc",
+                "available": available,
+                "path": path.map(|p| p.display().to_string()),
+                "setup": "gcloud auth application-default login"
+            }),
+        );
+    }
+    if available {
+        ui.success("ADC credentials found");
+        if let Some(path) = path {
+            println!("path: {}", path.display());
+        }
+    } else {
+        println!("ADC credentials missing");
+        println!("fix: gcloud auth application-default login");
+    }
+    Ok(())
+}
+
+fn adc_credentials_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS") {
+        return Some(PathBuf::from(path));
+    }
+    dirs::home_dir().map(|home| home.join(".config/gcloud/application_default_credentials.json"))
+}
+
 fn handle_auth_add(args: AuthProfileArgs, ui: Ui) -> Result<()> {
     let kind: crate::cocli::auth::profiles::AccountKind = args.kind.parse()?;
     let backend = if args.session_only {
@@ -638,6 +732,163 @@ async fn handle_session(cmd: Option<SessionCommands>, config: &ColabConfig, ui: 
                 })?;
             ui.print_server_status(last);
             Ok(())
+        }
+        Some(SessionCommands::Refresh) => handle_session_refresh(config, ui).await,
+        Some(SessionCommands::Repair(SessionNameArg { session })) => {
+            handle_session_repair(config, ui, session).await
+        }
+        Some(SessionCommands::Reconnect(SessionNameArg { session })) => {
+            handle_session_reconnect(config, ui, session).await
+        }
+        Some(SessionCommands::Logs(args)) => handle_session_logs(config, ui, args).await,
+        Some(SessionCommands::Kernel { command }) => {
+            handle_session_kernel(config, ui, command).await
+        }
+    }
+}
+
+async fn handle_session_refresh(config: &ColabConfig, ui: Ui) -> Result<()> {
+    let manager = make_manager(config)?;
+    match manager.list().await {
+        Ok((servers, removed)) => {
+            ui.success(&format!(
+                "sessions refreshed: {} active, {} stale removed",
+                servers.len(),
+                removed
+            ));
+            Ok(())
+        }
+        Err(e) => Err(map_session_network_error("refresh_sessions", e)),
+    }
+}
+
+async fn handle_session_repair(
+    config: &ColabConfig,
+    ui: Ui,
+    session: Option<String>,
+) -> Result<()> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session.as_deref())?;
+    validate_runtime_endpoint(server)?;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        manager.client().list_sessions_via_tunnel(&server.endpoint),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {
+            ui.success(&format!("session looks reachable: {}", server.label));
+            Ok(())
+        }
+        Ok(Err(e)) => Err(map_drive_stage_error("repair_session", server, e)),
+        Err(_) => Err(drive_endpoint_error(
+            "repair_session",
+            server,
+            "timeout",
+            true,
+            None,
+        )),
+    }
+}
+
+async fn handle_session_reconnect(
+    config: &ColabConfig,
+    ui: Ui,
+    session: Option<String>,
+) -> Result<()> {
+    match handle_session_repair(config, ui, session).await {
+        Ok(()) => Ok(()),
+        Err(_) => Err(ColabError::config(
+            "could not reconnect this local session to an active Colab runtime\nfix: colab-cli session list --refresh\n     colab-cli session new --name work",
+        )),
+    }
+}
+
+async fn handle_session_logs(config: &ColabConfig, ui: Ui, args: SessionLogsArgs) -> Result<()> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, args.session.as_deref())?;
+    let data = serde_json::json!({
+        "session": server.label,
+        "tail": args.tail,
+        "format": args.format,
+        "available": false,
+        "logs": [],
+        "note": "execution history is captured for commands run through colab-cli; this session has no persisted log stream"
+    });
+    let body = match args.format.as_str() {
+        "jsonl" => format!("{}\n", serde_json::to_string(&data)?),
+        "md" => format!(
+            "# Session logs\n\nsession: {}\n\nNo persisted log stream is available.\n",
+            server.label
+        ),
+        "ipynb" => serde_json::json!({
+            "nbformat": 4,
+            "nbformat_minor": 5,
+            "cells": [],
+            "metadata": { "colab_cli": data }
+        })
+        .to_string(),
+        _ => format!(
+            "Session logs\nsession: {}\n\nNo persisted log stream is available.\n",
+            server.label
+        ),
+    };
+    if let Some(out) = args.out {
+        std::fs::write(&out, body)?;
+        ui.success(&format!("logs written: {out}"));
+    } else {
+        print!("{body}");
+    }
+    Ok(())
+}
+
+async fn handle_session_kernel(
+    config: &ColabConfig,
+    ui: Ui,
+    command: SessionKernelCommands,
+) -> Result<()> {
+    match command {
+        SessionKernelCommands::Status(SessionNameArg { session }) => {
+            let manager = make_manager(config)?;
+            let servers = manager.list_local()?;
+            let server = resolve_server(&servers, session.as_deref())?;
+            validate_runtime_endpoint(server)?;
+            let sessions = drive_jupyter_sessions_with_retry(
+                manager.client(),
+                server,
+                std::time::Duration::from_secs(10),
+                0,
+                &ui,
+                false,
+            )
+            .await?;
+            let kernel = sessions.iter().find(|s| s.kernel.is_some());
+            if let Some(session) = kernel {
+                ui.success(&format!("kernel ready: {}", session.id));
+            } else {
+                println!("kernel unavailable");
+                println!("fix: colab-cli session url --open");
+            }
+            Ok(())
+        }
+        SessionKernelCommands::Interrupt(SessionNameArg { session }) => {
+            let _ = session;
+            Err(ColabError::config(
+                "kernel interrupt is not implemented for this runtime API yet",
+            ))
+        }
+        SessionKernelCommands::Restart { session, yes } => {
+            let _ = session;
+            if !yes {
+                return Err(ColabError::config(
+                    "kernel restart requires --yes; it interrupts running work",
+                ));
+            }
+            Err(ColabError::config(
+                "kernel restart is not implemented for this runtime API yet",
+            ))
         }
     }
 }
@@ -756,6 +1007,31 @@ async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Res
             handle_exec(ExecCommands::Shell { session }, config, ui).await
         }
         RunCommands::Pip { command } => handle_run_pip(command, config, ui).await,
+        RunCommands::Ast { file, json } => {
+            require_experiment("AST observer", |cfg| cfg.experiments.ast_observer)?;
+            print_code_outline(&file, json)
+        }
+        RunCommands::Watch {
+            script,
+            session,
+            ast,
+            args,
+        } => {
+            if ast {
+                require_experiment("AST observer", |cfg| cfg.experiments.ast_observer)?;
+                print_code_outline(&script, false)?;
+            }
+            handle_exec(
+                ExecCommands::Run {
+                    script,
+                    session,
+                    args,
+                },
+                config,
+                ui,
+            )
+            .await
+        }
         RunCommands::Install {
             packages,
             requirements,
@@ -1005,6 +1281,9 @@ async fn handle_fs_drive(
             path,
             dry_run,
             timeout,
+            preflight_timeout,
+            retries,
+            no_retry,
             open,
         } => {
             if dry_run {
@@ -1019,7 +1298,20 @@ async fn handle_fs_drive(
                     }),
                 );
             }
-            drive_mount(config, ui, json, session, path, timeout, open).await
+            drive_mount(
+                config,
+                ui,
+                json,
+                DriveMountOptions {
+                    session,
+                    path,
+                    timeout_secs: timeout,
+                    preflight_timeout_secs: preflight_timeout,
+                    retries: if no_retry { 0 } else { retries },
+                    open,
+                },
+            )
+            .await
         }
         FsDriveCommands::Status { session, dry_run } => {
             if dry_run {
@@ -1070,6 +1362,9 @@ async fn handle_mount(cmd: MountCommands, config: &ColabConfig, ui: Ui, json: bo
             session,
             path,
             timeout,
+            preflight_timeout,
+            retries,
+            no_retry,
             open,
             dry_run,
         } => {
@@ -1085,7 +1380,20 @@ async fn handle_mount(cmd: MountCommands, config: &ColabConfig, ui: Ui, json: bo
                     }),
                 );
             }
-            drive_mount(config, ui, json, session, path, timeout, open).await
+            drive_mount(
+                config,
+                ui,
+                json,
+                DriveMountOptions {
+                    session,
+                    path,
+                    timeout_secs: timeout,
+                    preflight_timeout_secs: preflight_timeout,
+                    retries: if no_retry { 0 } else { retries },
+                    open,
+                },
+            )
+            .await
         }
         MountCommands::List { session } => {
             let status = drive_status(config, ui, session, DEFAULT_DRIVE_PATH).await?;
@@ -1104,23 +1412,58 @@ struct DriveStatus {
     next_action: Option<String>,
 }
 
+struct DriveMountOptions {
+    session: Option<String>,
+    path: String,
+    timeout_secs: u64,
+    preflight_timeout_secs: u64,
+    retries: u8,
+    open: bool,
+}
+
 async fn drive_mount(
     config: &ColabConfig,
     ui: Ui,
     json: bool,
-    session: Option<String>,
-    path: String,
-    timeout_secs: u64,
-    open: bool,
+    options: DriveMountOptions,
 ) -> Result<()> {
+    let DriveMountOptions {
+        session,
+        path,
+        timeout_secs,
+        preflight_timeout_secs,
+        retries,
+        open,
+    } = options;
     drive_progress(&ui, "Drive mount");
-    drive_stage(&ui, "checking session");
+    drive_stage(&ui, "load_selected_session", "checking session");
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
     let server = resolve_server(&servers, session.as_deref())?;
     let server = ensure_fresh_token(&manager, server, &ui).await?;
+    drive_done(&ui, "session loaded", &server.label);
 
-    drive_stage(&ui, "checking existing Drive mount");
+    drive_stage(&ui, "validate_endpoint_url", "validating endpoint");
+    validate_runtime_endpoint(&server)?;
+    drive_done(&ui, "endpoint url valid", &server.endpoint);
+
+    let preflight_timeout = std::time::Duration::from_secs(preflight_timeout_secs.max(1));
+    let sessions = drive_jupyter_sessions_with_retry(
+        manager.client(),
+        &server,
+        preflight_timeout,
+        retries,
+        &ui,
+        json,
+    )
+    .await?;
+    drive_done(&ui, "endpoint reachable", "Jupyter sessions API");
+
+    drive_stage(&ui, "find_kernel", "finding kernel");
+    let session = select_drive_kernel(&sessions)?;
+    drive_done(&ui, "kernel found", "python3");
+
+    drive_stage(&ui, "check_existing_mount", "checking existing Drive mount");
     let status = drive_status_for_server(manager.client(), &server, &path).await?;
     if status.mounted == Some(true) {
         return print_drive_mount_success(json, &path, "Drive already mounted");
@@ -1134,20 +1477,26 @@ async fn drive_mount(
     }
 
     let timeout = std::time::Duration::from_secs(timeout_secs.max(1));
-    drive_stage(&ui, "checking kernel context");
-    preflight_drive_kernel(manager.client(), &server, timeout).await?;
+    drive_stage(&ui, "verify_kernel_context", "checking kernel context");
+    preflight_drive_kernel(manager.client(), &server, session, timeout).await?;
 
-    drive_stage(&ui, "requesting Drive mount");
-    let output =
-        runner::execute_colab_cell(manager.client(), &server, &drive_mount_cell(&path), timeout)
-            .await?;
+    drive_stage(&ui, "request_drive_mount", "requesting Drive mount");
+    let output = runner::execute_colab_cell_in_session(
+        manager.client(),
+        &server,
+        session,
+        &drive_mount_cell(&path),
+        timeout,
+    )
+    .await
+    .map_err(|e| map_drive_stage_error("request_drive_mount", &server, e))?;
     drive_output_to_result(&output)?;
 
     if output.timed_out {
         return Err(drive_approval_required(Some(output.raw_text())));
     }
 
-    drive_stage(&ui, "verifying /content/drive");
+    drive_stage(&ui, "verify_drive_path", "verifying /content/drive");
     let after = drive_status_for_server(manager.client(), &server, &path).await?;
     if after.mounted == Some(true) || drive_mount_output_looks_ok(&output.raw_text()) {
         print_drive_mount_success(json, &path, "Drive mounted")
@@ -1162,14 +1511,229 @@ async fn drive_mount(
 }
 
 fn drive_progress(ui: &Ui, title: &str) {
-    if ui.interactive && !ui.quiet {
+    if !ui.quiet {
         println!("{title}");
+        println!("{}", rule(*ui));
+        println!();
     }
 }
 
-fn drive_stage(ui: &Ui, label: &str) {
-    if ui.interactive && !ui.quiet {
+fn drive_stage(ui: &Ui, _stage: &str, label: &str) {
+    if !ui.quiet {
         println!("· {label}");
+    }
+}
+
+fn drive_done(ui: &Ui, label: &str, detail: &str) {
+    if !ui.quiet {
+        println!("✓ {label:<26} {detail}");
+    }
+}
+
+fn validate_runtime_endpoint(server: &StoredServer) -> Result<()> {
+    if server.endpoint.trim().is_empty() || server.proxy_url.trim().is_empty() {
+        return Err(ColabError::drive_stage(
+            "invalid_runtime_endpoint",
+            "Runtime endpoint is missing from the local session record",
+            "validate_endpoint_url",
+            false,
+            vec![
+                "colab-cli session list --refresh".to_string(),
+                "colab-cli session new --name work".to_string(),
+            ],
+            None,
+        ));
+    }
+    if !server.proxy_url.starts_with("https://") && !server.proxy_url.starts_with("http://") {
+        return Err(ColabError::drive_stage(
+            "invalid_runtime_endpoint",
+            "Runtime endpoint URL is invalid",
+            "validate_endpoint_url",
+            false,
+            vec![
+                "colab-cli session repair".to_string(),
+                "colab-cli session new --name work".to_string(),
+            ],
+            Some(server.proxy_url.clone()),
+        ));
+    }
+    Ok(())
+}
+
+async fn drive_jupyter_sessions_with_retry(
+    client: &ColabClient,
+    server: &StoredServer,
+    timeout: std::time::Duration,
+    retries: u8,
+    ui: &Ui,
+    json: bool,
+) -> Result<Vec<Session>> {
+    let attempts = retries.saturating_add(1).max(1);
+    let mut last = None;
+    for attempt in 1..=attempts {
+        drive_stage(
+            ui,
+            "check_jupyter_sessions",
+            &format!("checking Jupyter sessions attempt {attempt}/{attempts}"),
+        );
+        match tokio::time::timeout(timeout, client.list_sessions_via_tunnel(&server.endpoint)).await
+        {
+            Ok(Ok(sessions)) => return Ok(sessions),
+            Ok(Err(e)) => {
+                let mapped = map_drive_stage_error("check_jupyter_sessions", server, e);
+                if !drive_error_retryable(&mapped) || attempt == attempts {
+                    return Err(mapped);
+                }
+                last = Some(mapped);
+            }
+            Err(_) => {
+                let mapped =
+                    drive_endpoint_error("check_jupyter_sessions", server, "timeout", true, None);
+                if attempt == attempts {
+                    return Err(mapped);
+                }
+                last = Some(mapped);
+            }
+        }
+        if !json && !ui.quiet {
+            println!("· retrying runtime endpoint");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200 * u64::from(attempt))).await;
+    }
+    Err(last.unwrap_or_else(|| {
+        drive_endpoint_error(
+            "check_jupyter_sessions",
+            server,
+            "unknown network",
+            true,
+            None,
+        )
+    }))
+}
+
+fn select_drive_kernel(sessions: &[Session]) -> Result<&Session> {
+    sessions.iter().find(|s| s.kernel.is_some()).ok_or_else(|| {
+        ColabError::drive_stage(
+            "drive_kernel_context_required",
+            "Drive mount needs a Colab kernel session",
+            "find_kernel",
+            false,
+            vec!["colab-cli session url --open".to_string()],
+            None,
+        )
+    })
+}
+
+fn drive_error_retryable(error: &ColabError) -> bool {
+    matches!(error, ColabError::Drive(drive) if drive.retryable)
+}
+
+fn map_drive_stage_error(stage: &str, server: &StoredServer, error: ColabError) -> ColabError {
+    match error {
+        ColabError::ApiError { status, url, body } => {
+            let kind = match status {
+                401 | 403 => "runtime_endpoint_auth",
+                404 => "stale_runtime_endpoint",
+                500..=599 => "colab_busy",
+                _ => "runtime_endpoint_unreachable",
+            };
+            let retryable = matches!(status, 429 | 500 | 502 | 503 | 504);
+            drive_endpoint_error(
+                stage,
+                server,
+                kind,
+                retryable,
+                Some(format!("{url}\n{body:?}")),
+            )
+        }
+        ColabError::Network(e) => {
+            let class = classify_network_error(&e.to_string());
+            drive_endpoint_error(stage, server, class, class != "tls", Some(e.to_string()))
+        }
+        ColabError::ServerNotFound { endpoint } => drive_endpoint_error(
+            stage,
+            server,
+            "stale_runtime_endpoint",
+            false,
+            Some(endpoint),
+        ),
+        other => other,
+    }
+}
+
+fn map_session_network_error(stage: &str, error: ColabError) -> ColabError {
+    match error {
+        ColabError::ApiError { status, url, body } => {
+            let retryable = retryable_status(status);
+            ColabError::drive_stage(
+                "session_refresh_failed",
+                format!("Colab returned {status} {}", http_reason(status)),
+                stage,
+                retryable,
+                vec![
+                    "colab-cli session list --refresh".to_string(),
+                    "colab-cli session new --name work".to_string(),
+                ],
+                Some(format!("{url}\n{body:?}")),
+            )
+        }
+        ColabError::Network(e) => ColabError::drive_stage(
+            classify_network_error(&e.to_string()),
+            "Session refresh could not reach Colab",
+            stage,
+            true,
+            vec!["colab-cli session list --refresh".to_string()],
+            Some(e.to_string()),
+        ),
+        other => other,
+    }
+}
+
+fn drive_endpoint_error(
+    stage: &str,
+    server: &StoredServer,
+    kind: &str,
+    retryable: bool,
+    raw: Option<String>,
+) -> ColabError {
+    let message = match kind {
+        "timeout" => "Runtime endpoint timed out",
+        "dns" => "Runtime endpoint DNS lookup failed",
+        "connection_refused" => "Runtime endpoint refused the connection",
+        "tls" => "Runtime endpoint TLS handshake failed",
+        "runtime_endpoint_auth" => "Runtime endpoint rejected the current credentials",
+        "stale_runtime_endpoint" => "Runtime endpoint is stale",
+        "colab_busy" => "Colab is busy",
+        _ => "Runtime endpoint is not reachable",
+    };
+    ColabError::drive_stage(
+        kind.to_string(),
+        format!(
+            "{message}\nsession: {}\n\nThis usually means the runtime expired, the endpoint changed, or Colab is busy",
+            server.label
+        ),
+        stage.to_string(),
+        retryable,
+        vec![
+            "colab-cli session list --refresh".to_string(),
+            "colab-cli session new --name work".to_string(),
+        ],
+        raw,
+    )
+}
+
+fn classify_network_error(raw: &str) -> &'static str {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("dns") || lower.contains("failed to lookup") {
+        "dns"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("connection refused") {
+        "connection_refused"
+    } else if lower.contains("tls") || lower.contains("certificate") {
+        "tls"
+    } else {
+        "unknown_network"
     }
 }
 
@@ -1183,16 +1747,29 @@ async fn drive_unmount(
     let servers = manager.list_local()?;
     let server = resolve_server(&servers, session.as_deref())?;
     let server = ensure_fresh_token(&manager, server, &ui).await?;
+    validate_runtime_endpoint(&server)?;
+    let sessions = drive_jupyter_sessions_with_retry(
+        manager.client(),
+        &server,
+        std::time::Duration::from_secs(10),
+        0,
+        &ui,
+        json,
+    )
+    .await?;
+    let session = select_drive_kernel(&sessions)?;
     preflight_drive_kernel(
         manager.client(),
         &server,
+        session,
         std::time::Duration::from_secs(30),
     )
     .await?;
 
-    let output = runner::execute_colab_cell(
+    let output = runner::execute_colab_cell_in_session(
         manager.client(),
         &server,
+        session,
         "from google.colab import drive\ndrive.flush_and_unmount()",
         std::time::Duration::from_secs(60),
     )
@@ -1260,10 +1837,18 @@ async fn drive_status_for_server(
 async fn preflight_drive_kernel(
     client: &ColabClient,
     server: &StoredServer,
+    session: &Session,
     timeout: std::time::Duration,
 ) -> Result<()> {
-    let output =
-        runner::execute_colab_cell(client, server, drive_preflight_cell(), timeout).await?;
+    let output = runner::execute_colab_cell_in_session(
+        client,
+        server,
+        session,
+        drive_preflight_cell(),
+        timeout,
+    )
+    .await
+    .map_err(|e| map_drive_stage_error("verify_kernel_context", server, e))?;
     drive_output_to_result(&output)?;
     if output.timed_out {
         return Err(ColabError::drive(
@@ -1693,7 +2278,30 @@ async fn handle_status(
                 "config_path": config::config_path().ok().map(|p| p.display().to_string())
             }),
         ),
+        Some(StatusCommands::Version) => print_version_info(json),
     }
+}
+
+fn print_version_info(json: bool) -> Result<()> {
+    let config_path = config::config_path().ok().map(|p| p.display().to_string());
+    let data = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "git_sha": option_env!("VERGEN_GIT_SHA").or(option_env!("GIT_SHA")),
+        "build_profile": if cfg!(debug_assertions) { "debug" } else { "release" },
+        "features": build_feature_list(),
+        "config_path": config_path,
+    });
+    print_value_or_kv(json, "version", &data)
+}
+
+fn build_feature_list() -> Vec<&'static str> {
+    [
+        (cfg!(feature = "dev-tools"), "dev-tools"),
+        (cfg!(feature = "owner-tools"), "owner-tools"),
+    ]
+    .into_iter()
+    .filter_map(|(enabled, name)| enabled.then_some(name))
+    .collect()
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -2021,6 +2629,9 @@ fn handle_settings(cmd: Option<SettingsCommands>, ui: Ui, json: bool) -> Result<
             handle_settings_experiments(command, ui, json)
         }
         Some(SettingsCommands::Support { command }) => handle_settings_support(command, json),
+        Some(SettingsCommands::About) => print_version_info(json),
+        Some(SettingsCommands::Update { command }) => handle_settings_update(command, json),
+        Some(SettingsCommands::Billing { command }) => handle_settings_billing(command, json),
         #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
         Some(SettingsCommands::Dev { command }) => {
             if !dev_tools_unlocked()? {
@@ -2030,6 +2641,86 @@ fn handle_settings(cmd: Option<SettingsCommands>, ui: Ui, json: bool) -> Result<
                 DevCommands::Release { command } => handle_release(command, json),
             }
         }
+    }
+}
+
+fn handle_settings_update(command: SettingsUpdateCommands, json: bool) -> Result<()> {
+    match command {
+        SettingsUpdateCommands::Check => {
+            let manager = detect_install_manager();
+            print_value_or_kv(
+                json,
+                "update",
+                &serde_json::json!({
+                    "current": env!("CARGO_PKG_VERSION"),
+                    "installer": manager,
+                    "auto_install": false,
+                    "note": "update check is local unless an installer-specific updater is configured"
+                }),
+            )
+        }
+        SettingsUpdateCommands::Install { yes } => {
+            if !yes {
+                return Err(ColabError::config(
+                    "update install requires --yes; colab-cli will not self-modify blindly",
+                ));
+            }
+            Err(ColabError::config(
+                "automatic update install is not configured for this binary\nfix: reinstall with your package manager",
+            ))
+        }
+    }
+}
+
+fn detect_install_manager() -> &'static str {
+    let exe = std::env::current_exe()
+        .ok()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    if exe.contains(".cargo/bin") {
+        "cargo"
+    } else if exe.contains("homebrew") || exe.contains("/Cellar/") {
+        "homebrew"
+    } else if exe.contains(".local/bin") || exe.contains("uv") {
+        "uv-or-pip"
+    } else {
+        "unknown"
+    }
+}
+
+fn handle_settings_billing(command: SettingsBillingCommands, json: bool) -> Result<()> {
+    match command {
+        SettingsBillingCommands::Open { dry_run } => {
+            let url = "https://colab.research.google.com/signup";
+            if json {
+                return print_value(
+                    true,
+                    &serde_json::json!({
+                        "action": "open_billing",
+                        "url": url,
+                        "would_open": !dry_run,
+                    }),
+                );
+            }
+            if dry_run {
+                println!("billing");
+                println!("  open           {url}");
+                println!("  would open     no");
+                return Ok(());
+            }
+            open_url(url)?;
+            println!("opened Colab billing page");
+            Ok(())
+        }
+        SettingsBillingCommands::Status => print_value_or_kv(
+            json,
+            "billing",
+            &serde_json::json!({
+                "available": false,
+                "message": "billing status unavailable from local config",
+                "open": "colab-cli settings billing open"
+            }),
+        ),
     }
 }
 
@@ -2044,6 +2735,8 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
         ("UI", "colour, theme, animations, bell, fun"),
         ("Experiments", "disabled optional features"),
         ("AI", "agent and tool workflows"),
+        ("Auth", "ADC, OAuth2, and profiles"),
+        ("Billing", "Colab billing links and local status"),
         ("Support", "redacted bug reports and bundles"),
         ("Dev", "maintainer-only tools, hidden by default"),
     ];
@@ -2065,6 +2758,14 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
             Some(2) => handle_settings_experiments(None, ui, json),
             Some(3) => handle_ai(Some(AiCommands::Tools { command: None }), ui, json),
             Some(4) => {
+                println!("Auth");
+                println!("  status         colab-cli auth status");
+                println!("  login adc      colab-cli auth login --method adc");
+                println!("  login oauth2   colab-cli auth login --method oauth2");
+                Ok(())
+            }
+            Some(5) => handle_settings_billing(SettingsBillingCommands::Status, json),
+            Some(6) => {
                 println!("Support");
                 println!("  bug reports     redacted by default");
                 println!("  bundle          colab-cli settings support bundle");
@@ -2083,7 +2784,7 @@ fn print_settings_menu(
     rows: &[(&str, &str)],
 ) -> Result<()> {
     println!("{}", heading("Settings", ui));
-    println!("Config, UI, experiments, support");
+    println!("Config, UI, experiments, support, billing");
     println!();
     for (index, (name, note)) in rows
         .iter()
@@ -2672,23 +3373,54 @@ fn print_skill_catalog(title: &str, subtitle: &str, rows: &[SkillRow], ui: Ui) -
         .iter()
         .map(|row| {
             vec![
-                row.name.to_string(),
-                row.risk.to_string(),
-                yes_no(row.needs_session).to_string(),
-                yes_no(row.network).to_string(),
+                command_text(row.name, ui),
+                skill_value("risk", row.risk, ui),
+                skill_value("session", yes_no(row.needs_session), ui),
+                skill_value("network", yes_no(row.network), ui),
+                skill_value("state", row.state, ui),
                 row.summary.to_string(),
             ]
         })
         .collect();
+    let headers = ["Tool", "Risk", "Session", "Network", "State", "Summary"]
+        .into_iter()
+        .map(|h| table_header(h, ui))
+        .collect::<Vec<_>>();
+    let header_refs = headers.iter().map(String::as_str).collect::<Vec<_>>();
     print!(
         "{}",
         crate::cocli::ui::table::render_table(
-            &["Tool", "Risk", "Needs session", "Network", "Summary"],
+            &header_refs,
             &table_rows,
             crate::cocli::ui::width::terminal_width()
         )
     );
     Ok(())
+}
+
+fn table_header(text: &str, ui: Ui) -> String {
+    if ui.plain {
+        text.to_string()
+    } else {
+        text.bright_cyan().bold().to_string()
+    }
+}
+
+fn skill_value(kind: &str, value: &str, ui: Ui) -> String {
+    if ui.plain {
+        return value.to_string();
+    }
+    match (kind, value) {
+        ("risk", "low") => value.bright_green().to_string(),
+        ("risk", "med") => value.yellow().to_string(),
+        ("risk", "high") => value.bright_red().to_string(),
+        ("session", "yes") => value.bright_magenta().to_string(),
+        ("network", "yes") => value.bright_blue().to_string(),
+        ("state", "ready") => value.bright_green().to_string(),
+        ("state", "gated") => value.yellow().to_string(),
+        ("state", "off") => value.dimmed().to_string(),
+        _ => value.to_string(),
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -2699,6 +3431,7 @@ struct SkillRow {
     risk: &'static str,
     needs_session: bool,
     network: bool,
+    state: &'static str,
     summary: &'static str,
     inputs: Vec<&'static str>,
     outputs: Vec<&'static str>,
@@ -2816,6 +3549,18 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             &["Destructive sync requires separate confirmation"],
         ),
         skill(
+            "fs.changed",
+            "files",
+            "low",
+            true,
+            true,
+            "Show local changes that sync would upload",
+            &["local", "remote"],
+            &["changed"],
+            &["colab-cli fs changed ./src /content/src --json"],
+            &["Read-only comparison"],
+        ),
+        skill(
             "support.bug-report",
             "support",
             "low",
@@ -2848,7 +3593,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Outline local Python code",
             &["file"],
             &["imports", "functions", "classes"],
-            &["colab-cli ai ast file.py --json"],
+            &["colab-cli run ast file.py --json"],
             &["Local read only"],
         ),
         skill(
@@ -2860,7 +3605,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Watch a local code outline",
             &["file"],
             &["outline"],
-            &["colab-cli ai ast watch file.py --json"],
+            &["colab-cli run watch file.py --ast"],
             &["Local read only"],
         ),
         skill(
@@ -2900,6 +3645,27 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             &["Destructive actions require confirmation"],
         ),
     ];
+    for row in &mut rows {
+        if row.name.starts_with("distribute.") {
+            row.state = if cfg.experiments.distribute {
+                "ready"
+            } else {
+                "gated"
+            };
+        } else if row.name.starts_with("ast.") {
+            row.state = if cfg.experiments.ast_observer {
+                "ready"
+            } else {
+                "off"
+            };
+        } else if row.name.starts_with("mcp.") {
+            row.state = if cfg.experiments.mcp_server {
+                "ready"
+            } else {
+                "off"
+            };
+        }
+    }
     if !cfg.experiments.continue_work {
         rows.retain(|row| !row.name.starts_with("continue."));
     }
@@ -2926,6 +3692,7 @@ fn skill(
         risk,
         needs_session,
         network,
+        state: "ready",
         summary,
         inputs: inputs.to_vec(),
         outputs: outputs.to_vec(),
@@ -3558,7 +4325,7 @@ fn handle_ai_tools(cmd: Option<AiToolsCommands>, ui: Ui, json: bool) -> Result<(
             if json || local_json {
                 print_value(true, &rows)
             } else {
-                print_skill_catalog("AI tools", "Agent-friendly workflows", &rows, ui)
+                print_skill_catalog("AI tools", "Agent-facing workflows", &rows, ui)
             }
         }
         AiToolsCommands::Inspect {
@@ -5499,40 +6266,31 @@ mod tests {
     #[test]
     fn drive_kernel_traceback_gets_friendly_error() {
         let raw = "AttributeError: 'NoneType' object has no attribute 'kernel'";
-        let Some(ColabError::Drive {
-            kind,
-            message,
-            next_action,
-            raw,
-        }) = classify_drive_error(raw)
-        else {
+        let Some(ColabError::Drive(drive)) = classify_drive_error(raw) else {
             panic!("expected drive error");
         };
-        assert_eq!(kind, "drive_kernel_context_required");
+        assert_eq!(drive.kind, "drive_kernel_context_required");
         assert_eq!(
-            message,
+            drive.message,
             "Drive mount needs a Colab kernel session, not a plain Python process"
         );
-        assert_eq!(next_action.as_deref(), Some("colab-cli session url --open"));
-        assert!(raw.as_deref().unwrap_or_default().contains("kernel"));
+        assert_eq!(
+            drive.next_action.as_deref(),
+            Some("colab-cli session url --open")
+        );
+        assert!(drive.raw.as_deref().unwrap_or_default().contains("kernel"));
     }
 
     #[test]
     fn drive_auth_request_gets_browser_approval_error() {
         let raw = "google.colab._message.blocking_request request_auth";
-        let Some(ColabError::Drive {
-            kind,
-            message,
-            next_action,
-            ..
-        }) = classify_drive_error(raw)
-        else {
+        let Some(ColabError::Drive(drive)) = classify_drive_error(raw) else {
             panic!("expected drive error");
         };
-        assert_eq!(kind, "drive_browser_approval_required");
-        assert_eq!(message, "Drive needs browser approval");
+        assert_eq!(drive.kind, "drive_browser_approval_required");
+        assert_eq!(drive.message, "Drive needs browser approval");
         assert_eq!(
-            next_action.as_deref(),
+            drive.next_action.as_deref(),
             Some(
                 "open the session once, then run fs drive mount again: colab-cli session url --open"
             )
@@ -5561,5 +6319,43 @@ mod tests {
             api_fix(503, url),
             Some("run again with Standard RAM: colab-cli session new --shape standard")
         );
+    }
+
+    #[test]
+    fn drive_endpoint_error_is_structured_and_retryable() {
+        let server = StoredServer {
+            id: uuid::Uuid::nil(),
+            label: "Colab CPU".to_string(),
+            variant: Variant::Cpu,
+            accelerator: None,
+            shape: Shape::Standard,
+            endpoint: "stale-endpoint".to_string(),
+            proxy_url: "https://example.invalid".to_string(),
+            proxy_token: "redacted".to_string(),
+            token_expires_at: chrono::Utc::now(),
+            date_assigned: chrono::Utc::now(),
+        };
+        let err = drive_endpoint_error(
+            "check_jupyter_sessions",
+            &server,
+            "unknown_network",
+            true,
+            Some("error sending request for url".to_string()),
+        );
+        let ColabError::Drive(drive) = err else {
+            panic!("expected drive error");
+        };
+        assert_eq!(drive.kind, "unknown_network");
+        assert_eq!(drive.stage.as_deref(), Some("check_jupyter_sessions"));
+        assert!(drive.retryable);
+        assert!(drive.message.contains("Runtime endpoint is not reachable"));
+        assert!(drive.message.contains("Colab CPU"));
+        assert!(
+            drive
+                .fixes
+                .iter()
+                .any(|fix| fix.contains("session list --refresh"))
+        );
+        assert!(drive.raw.as_deref().unwrap_or_default().contains("request"));
     }
 }

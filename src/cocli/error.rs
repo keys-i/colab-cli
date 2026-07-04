@@ -1,5 +1,22 @@
 use thiserror::Error;
 
+#[derive(Debug)]
+pub struct DriveError {
+    pub kind: String,
+    pub message: String,
+    pub next_action: Option<String>,
+    pub stage: Option<String>,
+    pub retryable: bool,
+    pub fixes: Vec<String>,
+    pub raw: Option<String>,
+}
+
+impl std::fmt::Display for DriveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ColabError {
     #[error("not authenticated \u{2014} run `colab-cli auth login` first")]
@@ -36,13 +53,8 @@ pub enum ColabError {
     #[error("local config error: {0}")]
     Config(String),
 
-    #[error("{message}")]
-    Drive {
-        kind: String,
-        message: String,
-        next_action: Option<String>,
-        raw: Option<String>,
-    },
+    #[error("{0}")]
+    Drive(Box<DriveError>),
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -86,12 +98,34 @@ impl ColabError {
         next_action: Option<&str>,
         raw: Option<String>,
     ) -> Self {
-        Self::Drive {
+        Self::Drive(Box::new(DriveError {
             kind: kind.into(),
             message: message.into(),
             next_action: next_action.map(str::to_string),
+            stage: None,
+            retryable: false,
+            fixes: next_action.map(|s| vec![s.to_string()]).unwrap_or_default(),
             raw,
-        }
+        }))
+    }
+
+    pub fn drive_stage(
+        kind: impl Into<String>,
+        message: impl Into<String>,
+        stage: impl Into<String>,
+        retryable: bool,
+        fixes: Vec<String>,
+        raw: Option<String>,
+    ) -> Self {
+        Self::Drive(Box::new(DriveError {
+            kind: kind.into(),
+            message: message.into(),
+            next_action: fixes.first().cloned(),
+            stage: Some(stage.into()),
+            retryable,
+            fixes,
+            raw,
+        }))
     }
 
     pub fn oauth(msg: impl Into<String>) -> Self {

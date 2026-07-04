@@ -12,7 +12,7 @@
 - Multi-login cannot be enabled while Distribute is off.
 - `settings skills list` renders an agent/tool catalog, not core commands.
 - `ai tools list` renders the same agent-facing catalog without debug booleans.
-- `ai ast`, `ai mcp`, `ai plan`, and `ai run` fail with `experimental feature disabled` until enabled.
+- `run ast`, `ai mcp`, `ai plan`, and `ai run` fail with `experimental feature disabled` until enabled.
 - `distribute` and `continue` fail with `experimental feature disabled` until enabled.
 - `run pip install`, `run pip freeze`, and `run pip restore` parse.
 - Old `run install`, `slurp`, and `fleet` aliases stay hidden and print migration hints when used.
@@ -21,5 +21,7 @@
 - `session new` keeps the existing prompt flow and renders a concise success card after assignment.
 - Transient Colab assignment errors do not dump HTML unless `--verbose` is passed.
 - `fs drive mount` shows staged progress in interactive terminals and maps kernel/approval failures to short errors.
+- `fs drive mount` maps endpoint/network failures to a staged Drive error and hides raw reqwest text unless `--verbose`.
+- `auth login --method adc`, `auth login --method oauth2`, `status version`, `settings update check`, `settings billing open --dry-run`, `session logs`, and `session kernel restart --help` parse.
 - Non-TTY output stays plain.
 - Shipyard remains a release tool first; no broad TUI is required for this pass.
