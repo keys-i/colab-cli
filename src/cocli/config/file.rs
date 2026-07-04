@@ -49,17 +49,21 @@ pub struct UiConfig {
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_true")]
-    pub interactive: bool,
-    #[serde(default = "default_true")]
     pub animations: bool,
+    #[serde(default = "default_tui")]
+    pub tui: String,
     #[serde(default)]
     pub bell: bool,
     #[serde(default)]
+    pub fun: bool,
+    #[serde(default)]
     pub compact: bool,
     #[serde(default = "default_true")]
+    pub icons: bool,
+    #[serde(default = "default_true")]
     pub unicode: bool,
-    #[serde(default)]
-    pub fun: bool,
+    #[serde(default = "default_true")]
+    pub neon: bool,
 }
 
 impl Default for UiConfig {
@@ -67,12 +71,14 @@ impl Default for UiConfig {
         Self {
             color: ColorChoice::Auto,
             theme: default_theme(),
-            interactive: true,
             animations: true,
+            tui: default_tui(),
             bell: false,
-            compact: false,
-            unicode: true,
             fun: false,
+            compact: false,
+            icons: true,
+            unicode: true,
+            neon: true,
         }
     }
 }
@@ -122,6 +128,12 @@ impl Default for SupportConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DevConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CocliConfig {
     #[serde(default)]
     pub ui: UiConfig,
@@ -131,6 +143,8 @@ pub struct CocliConfig {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub support: SupportConfig,
+    #[serde(default)]
+    pub dev: DevConfig,
 }
 
 impl CocliConfig {
@@ -156,6 +170,10 @@ fn default_true() -> bool {
 }
 
 fn default_theme() -> String {
+    "auto".to_string()
+}
+
+fn default_tui() -> String {
     "auto".to_string()
 }
 

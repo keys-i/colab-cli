@@ -17,9 +17,9 @@ This pass removed old public command spaces from normal help and kept hidden ali
 | `colab-cli runtime gpu` | `colab-cli status runtime --gpu` | clap, commands docs, tests | yes | Same read-only question. |
 | `colab-cli runtime tpu` | `colab-cli status runtime --tpu` | clap, commands docs, tests | yes | Same read-only question. |
 | `colab-cli runtime versions` | `colab-cli status runtime --versions` | clap, commands docs, tests | yes | Same metadata path. |
-| `colab-cli tools list` | `colab-cli settings skills list` | clap, README, tools docs, tests | yes | The registry is a user setting surface, not a top-level tool. |
-| `colab-cli tools inspect` | `colab-cli settings skills inspect` | clap, tools docs, tests | yes | Same skill metadata. |
-| `colab-cli tools run` | `colab-cli settings skills run` | clap, tools docs | yes | Same dry-run command plan. |
+| `colab-cli tools list` | `colab-cli settings skills list` | clap, README, skills docs, tests | yes | Optional agent/tool surfaces belong under settings, not as a top-level command. |
+| `colab-cli tools inspect` | `colab-cli settings skills inspect` | clap, skills docs, tests | yes | Same agent/tool metadata. |
+| `colab-cli tools run` | `colab-cli settings skills run` | clap, skills docs | yes | Same inspectable JSON plan path. |
 | `colab-cli config get` | `colab-cli settings get` | clap, commands docs | yes | Local config belongs under settings. |
 | `colab-cli config set` | `colab-cli settings set` | clap, README, commands docs | yes | Local config belongs under settings. |
 | `colab-cli config path` | `colab-cli settings path` | clap, README, commands docs, tests | yes | Same path lookup. |
@@ -27,11 +27,8 @@ This pass removed old public command spaces from normal help and kept hidden ali
 | `colab-cli doctor quick` | `colab-cli status quick` | clap, README, commands docs, tests | yes | Health checks are status reads. |
 | `colab-cli doctor` | `colab-cli status check` | clap, tests | yes | One health-check surface. |
 | `colab-cli session status` | `colab-cli status session` | clap, README, commands docs | yes | Session status should not live in two visible places. |
-| `session_new` | `session.new` | skill registry, tools docs, tests | internal alias only | Dot names are easier to read in JSON and tables. |
-| `exec_python` | `run.python` | skill registry, tools docs, tests | internal alias only | Old snake name still resolves for one cycle. |
-| `env_install` | `run.install` | skill registry, tools docs | internal alias only | Matches the run command surface. |
-| `runtime_info` | `status.runtime` | skill registry, skills docs | internal alias only | Runtime reads live under status. |
-| `doctor` skill | `status.check` | skill registry, tools docs | internal alias only | Health checks moved under status. |
+| core command skills | optional agent catalog entries | settings skills docs, tests | n/a | Users run core work as commands; agents inspect thin tool surfaces. |
+| snake_case skill names | dotted skill names | settings skills docs, tests | internal alias only | Human output never shows old raw names. |
 
 ## Drive Mount Fix
 
@@ -43,4 +40,4 @@ moved: use `colab-cli fs drive mount`
 
 The implementation lives behind `fs drive mount`. It runs `google.colab.drive.mount()` through a Colab kernel cell. It no longer calls the helper from a plain remote `python -c` process, because that process has no IPython kernel and fails with `NoneType`/`kernel` tracebacks.
 
-`auth`, `agent`, `bug-report`, `server`, `file`, and shell completions are hidden from top-level help. They remain parseable because there is no smaller replacement for every existing flow yet.
+`agent`, `bug-report`, `server`, `file`, and old alias groups are hidden from top-level help. Public help shows only normal command spaces plus completions.

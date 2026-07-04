@@ -5,7 +5,9 @@ use clap::{Parser, Subcommand};
     name = "colab-cli",
     about = "Google Colab from the terminal",
     version,
-    disable_help_subcommand = true
+    disable_help_subcommand = true,
+    override_usage = "colab-cli [OPTIONS] <COMMAND>",
+    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  continue     Checkpoint and resume work\n  slurp        Tiny TOML workflows\n  fleet        Compliant runtime planning\n  auth         Google account profiles\n  settings     Config, skills, support, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --color <auto|always|never>\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
 )]
 pub struct Cli {
     #[arg(long, short, global = true, env = "COLAB_QUIET")]
@@ -17,7 +19,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub verbose: bool,
 
-    #[arg(long, global = true, default_value = "auto", value_parser = ["auto", "always", "never"])]
+    #[arg(long, global = true, default_value = "auto", value_name = "auto|always|never", value_parser = ["auto", "always", "never"])]
     pub color: String,
 
     #[arg(long, global = true)]
@@ -26,13 +28,13 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub bell: bool,
 
-    #[arg(long, global = true)]
+    #[arg(long, global = true, hide = true)]
     pub no_interactive: bool,
 
-    #[arg(long, global = true)]
+    #[arg(long, global = true, hide = true)]
     pub plain: bool,
 
-    #[arg(long, global = true)]
+    #[arg(long, global = true, hide = true)]
     pub tui: bool,
 
     #[command(subcommand)]
@@ -41,53 +43,63 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// create, list, stop, and open Colab sessions
+    /// Manage Colab sessions
+    #[command(display_order = 10)]
     Session {
         #[command(subcommand)]
-        command: SessionCommands,
+        command: Option<SessionCommands>,
     },
-    /// run code and prepare the runtime
+    /// Run code and prepare runtimes
+    #[command(display_order = 20)]
     Run {
         #[command(subcommand)]
         command: RunCommands,
     },
-    /// move files and manage Drive
+    /// Files, sync, and Drive
+    #[command(display_order = 30)]
     Fs {
         #[command(subcommand)]
         command: FsCommands,
     },
-    /// show runtime, auth, session, and health state
+    /// State, health, and runtime info
+    #[command(display_order = 40)]
     Status {
         #[command(subcommand)]
         command: Option<StatusCommands>,
     },
-    /// save and resume checkpoint plans
+    /// Checkpoint and resume work
     #[command(name = "continue")]
+    #[command(display_order = 50)]
     Continue {
         #[command(subcommand)]
         command: ContinueCommands,
     },
-    /// run tiny TOML workflows
+    /// Tiny TOML workflows
+    #[command(display_order = 60)]
     Slurp {
         #[command(subcommand)]
         command: SlurpCommands,
     },
-    /// plan approved multi-runtime work
+    /// Compliant runtime planning
+    #[command(display_order = 70)]
     Fleet {
         #[command(subcommand)]
         command: FleetCommands,
     },
-    /// edit config, UI, skills, and support
-    Settings {
-        #[command(subcommand)]
-        command: Option<SettingsCommands>,
-    },
-    /// Authentication
+    /// Google account profiles
+    #[command(display_order = 80)]
     Auth {
         #[command(subcommand)]
         command: AuthCommands,
     },
+    /// Config, skills, support, and UI
+    #[command(display_order = 90)]
+    Settings {
+        #[command(subcommand)]
+        command: Option<SettingsCommands>,
+    },
     /// Generate shell completions
+    #[command(display_order = 100)]
     Completions { shell: clap_complete::Shell },
 
     /// Write a redacted diagnostic bundle
@@ -664,11 +676,11 @@ pub enum SettingsCommands {
         #[command(subcommand)]
         command: SupportCommands,
     },
-    #[cfg(feature = "owner-tools")]
+    #[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
     #[command(hide = true)]
-    Owner {
+    Dev {
         #[command(subcommand)]
-        command: OwnerCommands,
+        command: DevCommands,
     },
 }
 
@@ -708,10 +720,16 @@ pub enum SkillCommands {
     Disable {
         name: String,
     },
+    Mcp {
+        #[arg(long)]
+        stdio: bool,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum SettingsUiCommands {
+    Get { key: Option<String> },
+    Set { key: String, value: String },
     Preview,
 }
 
@@ -727,9 +745,9 @@ pub enum SupportCommands {
     Bundle,
 }
 
-#[cfg(feature = "owner-tools")]
+#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
 #[derive(Subcommand)]
-pub enum OwnerCommands {
+pub enum DevCommands {
     Release {
         #[command(subcommand)]
         command: ReleaseCommands,
@@ -1055,7 +1073,7 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Session {
-                command: SessionCommands::New(_)
+                command: Some(SessionCommands::New(_))
             })
         ));
     }
@@ -1102,7 +1120,7 @@ mod tests {
         assert!(Cli::try_parse_from(["colab-cli", "status", "runtime", "--gpu"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "fs", "drive", "mount"]).is_ok());
         assert!(
-            Cli::try_parse_from(["colab-cli", "settings", "skills", "inspect", "session.new"])
+            Cli::try_parse_from(["colab-cli", "settings", "skills", "inspect", "slurp.plan"])
                 .is_ok()
         );
         assert!(
@@ -1110,17 +1128,10 @@ mod tests {
         );
         assert!(Cli::try_parse_from(["colab-cli", "slurp", "explain"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "release", "name", "v0.4.2"]).is_err());
-        #[cfg(feature = "owner-tools")]
+        #[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
         assert!(
-            Cli::try_parse_from([
-                "colab-cli",
-                "settings",
-                "owner",
-                "release",
-                "name",
-                "v0.4.2"
-            ])
-            .is_ok()
+            Cli::try_parse_from(["colab-cli", "settings", "dev", "release", "name", "v0.4.2"])
+                .is_ok()
         );
     }
 

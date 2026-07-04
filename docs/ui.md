@@ -25,9 +25,9 @@ No animation, colour-only decoration, launcher prompts, or fun lines are printed
 - `--quiet` is passed
 - `--no-color` or `--color never` is passed
 - `COLAB_NO_INTERACTIVE=1` is set
-- `ui.interactive = false` is configured
+- `ui.tui = "never"` is configured
 
-The current launcher is deliberately small. It prints quick actions and command previews. A full TUI can come later if the command flows prove they need it.
+The current launcher is deliberately small. It prints quick actions without command previews. A full-screen TUI can come later if the command flows prove they need it.
 
 ## Status
 
@@ -35,9 +35,11 @@ Human status is sectioned text by default:
 
 ```text
 cocli status
-Auth      ready
-Session   no active session
-Runtime   choose a session first
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Auth       ✓ ready
+Session    ! no active session
+Runtime    · pick a session first
 ```
 
 JSON is only printed with `--json`.

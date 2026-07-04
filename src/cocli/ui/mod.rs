@@ -219,14 +219,15 @@ impl Ui {
 
         println!("{}", "Server".bold());
         kv("Name", &s.label.bold().to_string());
-        kv("Type", &s.variant.display_name().cyan().to_string());
         kv(
             "Accelerator",
-            s.accelerator.as_deref().unwrap_or("\u{2014}"),
+            s.accelerator
+                .as_deref()
+                .unwrap_or_else(|| s.variant.display_name()),
         );
         kv("Shape", s.shape.display_name());
         kv("Endpoint", &s.endpoint.dimmed().to_string());
-        kv("Token expires", &expiry_str);
+        kv("Token", &format!("expires in {expiry_str}"));
         kv(
             "Assigned",
             &s.date_assigned

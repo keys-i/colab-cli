@@ -56,7 +56,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [features]
 default = []
-owner-tools = []
+dev-tools = []
+owner-tools = ["dev-tools"]
 agent-tools = []
 
 [dev-dependencies]

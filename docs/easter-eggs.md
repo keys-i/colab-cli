@@ -2,13 +2,11 @@
 
 Fun output is tiny and opt-in or explicit.
 
-Maintainer helper:
+Preference:
 
 ```sh
 colab-cli settings set ui.fun true
 ```
-
-`colab-cli settings owner release name` exists only when built with `--features owner-tools`.
 
 Rules:
 

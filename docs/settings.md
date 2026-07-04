@@ -15,9 +15,9 @@ colab-cli settings
 Set one key:
 
 ```sh
-colab-cli settings set ui.theme neon
-colab-cli settings set ui.interactive false
+colab-cli settings set ui.theme auto
 colab-cli settings set ui.animations false
+colab-cli settings ui set animations true
 ```
 
 Preview the terminal colour roles:
@@ -30,18 +30,33 @@ The important defaults are boring:
 
 ```toml
 [ui]
-theme = "auto"
 color = "auto"
-interactive = true
+theme = "auto"
 animations = true
+tui = "auto"
 bell = false
 fun = false
+compact = false
+icons = true
+unicode = true
+neon = true
 
 [output]
 json = false
 quiet = false
 verbose = false
 timestamps = false
+
+[skills]
+enabled = true
+
+[support]
+redact_paths = true
+redact_emails = true
+redact_tokens = true
+
+[dev]
+enabled = false
 ```
 
-Owner tools are not part of normal settings. They require the `owner-tools` feature and are documented in [owner-tools.md](owner-tools.md).
+Private maintainer helpers are hidden under `settings dev` and documented only in [maintainer.md](maintainer.md).

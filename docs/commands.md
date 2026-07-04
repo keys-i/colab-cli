@@ -120,12 +120,15 @@ colab-cli settings get
 colab-cli settings set ui.fun true
 colab-cli settings path
 colab-cli settings edit
+colab-cli settings ui get
+colab-cli settings ui set animations false
+colab-cli settings ui preview
 colab-cli settings skills list
-colab-cli settings skills inspect session.new
-colab-cli settings skills run fs.push --json-input '{"src":"./data.csv","dest":"/content/data.csv"}'
+colab-cli settings skills inspect slurp.plan
+colab-cli settings skills run slurp.plan --json-input '{}'
 ```
 
-Skills are built-in command plans. This is not a plugin marketplace.
+Skills are optional agent/tool surfaces. Core work stays in normal commands.
 
 ## Migration Aliases
 

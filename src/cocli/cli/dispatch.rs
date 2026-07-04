@@ -14,8 +14,8 @@ use crate::cocli::cli::{
     SettingsCommands, SettingsUiCommands, SkillCommands, SlurpCommands, StatusCommands,
     SupportCommands, ToolsCommands,
 };
-#[cfg(feature = "owner-tools")]
-use crate::cocli::cli::{OwnerCommands, ReleaseCommands};
+#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+use crate::cocli::cli::{DevCommands, ReleaseCommands};
 use crate::cocli::config::{self, ColabConfig};
 use crate::cocli::error::{ColabError, Result};
 use crate::cocli::exec::runner;
@@ -40,11 +40,14 @@ pub async fn main_entry() {
         cli.json,
     );
     colored::control::set_override(use_color);
-    let ring_bell = config::terminal_bell_allowed(cli.bell, ci, cli.quiet);
+    let ring_bell = config::terminal_bell_allowed(cli.bell, ci, cli.quiet || cli.json);
     let json_mode = cli.json;
     let verbose = cli.verbose;
     let interactive = interaction_allowed(&cli, stdout_tty, stdin_tty, ci);
-    let ui = Ui::new(cli.quiet || cli.json, cli.plain || !stdout_tty, interactive);
+    let plain = cli.plain
+        || ((ci || !stdout_tty) && color_choice != config::ColorChoice::Always)
+        || !use_color;
+    let ui = Ui::new(cli.quiet || cli.json, plain, interactive);
 
     if let Err(e) = run(cli, ui).await {
         if json_mode {
@@ -161,7 +164,7 @@ fn interaction_allowed(cli: &Cli, stdout_tty: bool, stdin_tty: bool, ci: bool) -
         return true;
     };
     config::CocliConfig::load(&path)
-        .map(|cfg| cfg.ui.interactive)
+        .map(|cfg| cfg.ui.tui != "never")
         .unwrap_or(true)
 }
 
@@ -372,17 +375,17 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         Some(Commands::CompatNew(args)) => {
             migration(&ui, "colab-cli session new");
             let config = ColabConfig::load(cli.quiet)?;
-            handle_session(SessionCommands::New(args), &config, ui).await
+            handle_session(Some(SessionCommands::New(args)), &config, ui).await
         }
         Some(Commands::CompatSessions) => {
             migration(&ui, "colab-cli session list");
             let config = ColabConfig::load(cli.quiet)?;
-            handle_session(SessionCommands::List, &config, ui).await
+            handle_session(Some(SessionCommands::List), &config, ui).await
         }
         Some(Commands::CompatStop(arg)) => {
             migration(&ui, "colab-cli session stop");
             let config = ColabConfig::load(cli.quiet)?;
-            handle_session(SessionCommands::Stop(arg), &config, ui).await
+            handle_session(Some(SessionCommands::Stop(arg)), &config, ui).await
         }
         Some(Commands::CompatUpload(args)) => {
             migration(&ui, "colab-cli fs push LOCAL REMOTE");
@@ -539,9 +542,10 @@ fn handle_auth_add(args: AuthProfileArgs, ui: Ui) -> Result<()> {
     Ok(())
 }
 
-async fn handle_session(cmd: SessionCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+async fn handle_session(cmd: Option<SessionCommands>, config: &ColabConfig, ui: Ui) -> Result<()> {
     match cmd {
-        SessionCommands::New(args) => {
+        None => handle_session_menu(config, ui).await,
+        Some(SessionCommands::New(args)) => {
             let (variant, accelerator) = session_accelerator(&args)?;
             handle_assign(
                 config,
@@ -554,14 +558,16 @@ async fn handle_session(cmd: SessionCommands, config: &ColabConfig, ui: Ui) -> R
             )
             .await
         }
-        SessionCommands::List => handle_ls(config, ui).await,
-        SessionCommands::Status(SessionNameArg { session }) => {
+        Some(SessionCommands::List) => handle_ls(config, ui).await,
+        Some(SessionCommands::Status(SessionNameArg { session })) => {
             migration(&ui, "colab-cli status session --name NAME");
             handle_info(config, ui, session).await
         }
-        SessionCommands::Stop(SessionNameArg { session }) => handle_rm(config, ui, session).await,
-        SessionCommands::Url { session, open } => handle_url(config, ui, session, open).await,
-        SessionCommands::Last => {
+        Some(SessionCommands::Stop(SessionNameArg { session })) => {
+            handle_rm(config, ui, session).await
+        }
+        Some(SessionCommands::Url { session, open }) => handle_url(config, ui, session, open).await,
+        Some(SessionCommands::Last) => {
             let manager = make_manager(config)?;
             let servers = manager.list_local()?;
             let last = servers
@@ -574,6 +580,52 @@ async fn handle_session(cmd: SessionCommands, config: &ColabConfig, ui: Ui) -> R
             Ok(())
         }
     }
+}
+
+async fn handle_session_menu(config: &ColabConfig, ui: Ui) -> Result<()> {
+    let actions = [
+        ("New session", "Assign a Colab runtime"),
+        ("List sessions", "Show local assigned runtimes"),
+        ("Last session", "Inspect the latest runtime"),
+        ("Close", "Return to shell"),
+    ];
+    if ui.interactive {
+        let choice = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("Session")
+            .items(&actions.map(|(name, note)| format!("{name} - {note}")))
+            .default(0)
+            .interact_opt()
+            .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
+        return match choice {
+            Some(0) => handle_assign(config, ui, None, None, None, Shape::Standard, false).await,
+            Some(1) => handle_ls(config, ui).await,
+            Some(2) => {
+                let manager = make_manager(config)?;
+                let servers = manager.list_local()?;
+                let last = servers
+                    .iter()
+                    .max_by_key(|s| s.date_assigned)
+                    .ok_or_else(|| {
+                        ColabError::config("no active session - run `colab-cli session list`")
+                    })?;
+                ui.print_server_status(last);
+                Ok(())
+            }
+            _ => Ok(()),
+        };
+    }
+
+    println!("Session");
+    println!("Manage Colab sessions");
+    println!();
+    for (name, note) in actions.iter().take(3) {
+        println!("  {:<14} {}", name, note);
+    }
+    println!();
+    println!("Next");
+    println!("  colab-cli session list");
+    println!("  colab-cli session new --name work");
+    Ok(())
 }
 
 async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
@@ -759,8 +811,8 @@ async fn handle_fs(cmd: FsCommands, config: &ColabConfig, ui: Ui, json: bool) ->
         }
         FsCommands::Edit { path, session } => handle_file_edit(config, ui, session, path).await,
         FsCommands::Sync(args) => handle_fs_sync(args, ui, json),
-        FsCommands::Diff(args) => handle_fs_diff(args, ui),
-        FsCommands::Changed(args) => handle_fs_diff(args, ui),
+        FsCommands::Diff(args) => handle_fs_diff(args, ui, json),
+        FsCommands::Changed(args) => handle_fs_diff(args, ui, json),
         FsCommands::Drive { command } => handle_fs_drive(command, config, ui, json).await,
     }
 }
@@ -1451,10 +1503,7 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
     let account = auth::current_account()?;
     let sessions = local_servers(config);
     let has_session = !sessions.is_empty();
-    let config_path = config::config_path()
-        .ok()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unknown>".to_string());
+    let files_ready = cache_writable(&config.data_dir);
 
     let mut next_actions = Vec::new();
     if account.is_none() {
@@ -1463,6 +1512,14 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
     if !has_session {
         next_actions.push("colab-cli session list".to_string());
         next_actions.push("colab-cli session new --name work".to_string());
+    } else {
+        let name = latest_server(&sessions)
+            .map(|s| s.label.as_str())
+            .unwrap_or("work");
+        next_actions.push(format!(
+            "colab-cli run py --code \"print('hello')\" --session \"{name}\""
+        ));
+        next_actions.push("colab-cli status runtime --all".to_string());
     }
 
     Ok(StatusReport {
@@ -1470,15 +1527,11 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
         sections: vec![
             StatusLine {
                 name: "Auth",
-                state: if account.is_some() {
-                    "ready"
-                } else {
-                    "missing"
-                },
+                state: if account.is_some() { "ready" } else { "warn" },
                 message: if account.is_some() {
                     "ready".to_string()
                 } else {
-                    "run `colab-cli auth login`".to_string()
+                    "sign in to continue".to_string()
                 },
             },
             StatusLine {
@@ -1487,36 +1540,41 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
                 message: sessions
                     .iter()
                     .max_by_key(|s| s.date_assigned)
-                    .map(|s| format!("last: {}", s.label))
+                    .map(|s| format!("active: {}", s.label))
                     .unwrap_or_else(|| "no active session".to_string()),
             },
             StatusLine {
                 name: "Runtime",
                 state: if has_session { "info" } else { "idle" },
                 message: if has_session {
-                    "run `colab-cli status runtime --all`".to_string()
+                    "check with status runtime --all".to_string()
                 } else {
-                    "choose a session first".to_string()
+                    "pick a session first".to_string()
                 },
             },
             StatusLine {
                 name: "Files",
-                state: "info",
-                message: "run `colab-cli fs changed LOCAL REMOTE`".to_string(),
+                state: if files_ready { "ready" } else { "warn" },
+                message: if files_ready {
+                    "cache writable".to_string()
+                } else {
+                    "cache path is not writable".to_string()
+                },
             },
             StatusLine {
                 name: "Drive",
-                state: "info",
-                message: "run `colab-cli fs drive status`".to_string(),
-            },
-            StatusLine {
-                name: "Config",
-                state: "info",
-                message: config_path,
+                state: "idle",
+                message: "run fs drive status after choosing a session".to_string(),
             },
         ],
         next_actions,
     })
+}
+
+fn cache_writable(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|m| !m.permissions().readonly())
+        .unwrap_or(false)
 }
 
 fn local_servers(config: &ColabConfig) -> Vec<StoredServer> {
@@ -1530,42 +1588,85 @@ fn render_status_report(report: &StatusReport, json: bool, ui: Ui) -> Result<()>
     if json {
         return print_value(true, report);
     }
-    if ui.plain {
-        println!("{}", report.title);
-        for section in &report.sections {
-            println!("{:<8} {}", section.name, section.message);
-        }
-    } else {
+    println!("{}", heading(&report.title, ui));
+    println!("{}", rule(ui));
+    println!();
+    for section in &report.sections {
+        let symbol = status_symbol(section.state, ui);
         println!(
-            "{}",
-            "╭─ cocli status ─────────────────────────╮".bright_cyan()
-        );
-        for section in &report.sections {
-            let symbol = status_symbol(section.state);
-            let message = section.message.as_str();
-            println!("│ {:<8} {} {:<28} │", section.name, symbol, message);
-        }
-        println!(
-            "{}",
-            "╰─────────────────────────────────────────╯".bright_cyan()
+            "{:<10} {} {}",
+            section.name,
+            symbol,
+            human_message(&section.message, ui)
         );
     }
     if !report.next_actions.is_empty() {
         println!();
-        println!("next");
+        println!("{}", heading("Next", ui));
         for action in &report.next_actions {
-            println!("  {action}");
+            println!("  {}", command_text(action, ui));
         }
     }
     Ok(())
 }
 
-fn status_symbol(state: &str) -> colored::ColoredString {
-    match state {
-        "ready" => "✓".bright_green(),
-        "warn" | "missing" => "!".yellow(),
-        _ => "·".dimmed(),
+fn status_symbol(state: &str, ui: Ui) -> String {
+    if ui.plain {
+        return match state {
+            "ready" => "✓",
+            "warn" | "missing" => "!",
+            "error" => "x",
+            _ => "·",
+        }
+        .to_string();
     }
+    match state {
+        "ready" => "✓".bright_green().bold().to_string(),
+        "warn" | "missing" => "!".yellow().bold().to_string(),
+        "error" => "x".bright_red().bold().to_string(),
+        "info" => "·".bright_cyan().to_string(),
+        _ => "·".dimmed().to_string(),
+    }
+}
+
+fn heading(text: &str, ui: Ui) -> String {
+    if ui.plain {
+        text.to_string()
+    } else {
+        text.bright_magenta().bold().to_string()
+    }
+}
+
+fn rule(ui: Ui) -> String {
+    let line = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    if ui.plain {
+        line.to_string()
+    } else {
+        line.bright_blue().to_string()
+    }
+}
+
+fn command_text(text: &str, ui: Ui) -> String {
+    if ui.plain {
+        text.to_string()
+    } else {
+        text.bright_cyan().to_string()
+    }
+}
+
+fn path_text(text: &str, ui: Ui) -> String {
+    if ui.plain {
+        text.to_string()
+    } else {
+        text.bright_blue().to_string()
+    }
+}
+
+fn human_message(text: &str, ui: Ui) -> String {
+    if let Some(path) = text.strip_prefix('/') {
+        return path_text(&format!("/{path}"), ui);
+    }
+    text.to_string()
 }
 
 fn print_value_or_kv<T: serde::Serialize>(json: bool, title: &str, value: &T) -> Result<()> {
@@ -1577,12 +1678,16 @@ fn print_value_or_kv<T: serde::Serialize>(json: bool, title: &str, value: &T) ->
     match value {
         serde_json::Value::Object(map) => {
             for (key, value) in map {
-                println!("  {:<14} {}", key, human_value(&value));
+                println!("  {:<14} {}", human_key(&key), human_value(&value));
             }
         }
         other => println!("  {}", human_value(&other)),
     }
     Ok(())
+}
+
+fn human_key(key: &str) -> String {
+    key.replace('_', " ")
 }
 
 fn human_value(value: &serde_json::Value) -> String {
@@ -1661,15 +1766,15 @@ fn handle_settings(cmd: Option<SettingsCommands>, ui: Ui, json: bool) -> Result<
             Ok(())
         }
         Some(SettingsCommands::Skills { command }) => handle_skills(command, ui, json),
-        Some(SettingsCommands::Ui { command }) => handle_settings_ui(command, json),
+        Some(SettingsCommands::Ui { command }) => handle_settings_ui(command, ui, json),
         Some(SettingsCommands::Support { command }) => handle_settings_support(command, json),
-        #[cfg(feature = "owner-tools")]
-        Some(SettingsCommands::Owner { command }) => {
-            if !owner_allowed() {
-                return Err(ColabError::config("owner tools are disabled for this user"));
+        #[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+        Some(SettingsCommands::Dev { command }) => {
+            if !maintainer_allowed() {
+                return Err(ColabError::config("private maintainer command"));
             }
             match command {
-                OwnerCommands::Release { command } => handle_release(command, json),
+                DevCommands::Release { command } => handle_release(command, json),
             }
         }
     }
@@ -1681,33 +1786,87 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
     if json {
         return print_value(true, &cfg);
     }
-    if !ui.plain {
-        println!("{}", "cocli settings".bright_cyan().bold());
-    } else {
-        println!("cocli settings");
+    let rows = [
+        ("General", "config path, profiles, defaults"),
+        ("UI", "colour, theme, animations, bell, fun"),
+        ("Skills", "agent/tool catalog"),
+        ("Support", "redacted bug reports and bundles"),
+        ("Dev", "maintainer-only tools, hidden by default"),
+    ];
+
+    if ui.interactive {
+        let choices: Vec<_> = rows
+            .iter()
+            .filter(|(name, _)| *name != "Dev" || maintainer_allowed())
+            .map(|(name, note)| format!("{name} - {note}"))
+            .collect();
+        let choice = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("Settings")
+            .items(&choices)
+            .default(0)
+            .interact_opt()
+            .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
+        return match choice {
+            Some(1) => handle_settings_ui(None, ui, json),
+            Some(2) => handle_skills(
+                SkillCommands::List {
+                    json: false,
+                    category: None,
+                    scope: None,
+                    risk: None,
+                    needs_session: false,
+                    enabled: false,
+                    disabled: false,
+                },
+                ui,
+                json,
+            ),
+            Some(3) => {
+                println!("Support");
+                println!("  bug reports     redacted by default");
+                println!("  bundle          colab-cli settings support bundle");
+                Ok(())
+            }
+            _ => print_settings_menu(&path, &cfg, ui, &rows),
+        };
     }
-    println!("General");
-    println!("  config path     {}", path.display());
-    println!("UI");
-    println!("  theme           {}", cfg.ui.theme);
+    print_settings_menu(&path, &cfg, ui, &rows)
+}
+
+fn print_settings_menu(
+    path: &Path,
+    cfg: &config::CocliConfig,
+    ui: Ui,
+    rows: &[(&str, &str)],
+) -> Result<()> {
+    println!("{}", heading("Settings", ui));
+    println!("Config, UI, skills, and support");
+    println!();
+    for (index, (name, note)) in rows.iter().enumerate() {
+        let marker = if index == 0 { "›" } else { " " };
+        let visible = if *name == "Dev" && !maintainer_allowed() {
+            "hidden"
+        } else {
+            note
+        };
+        println!("{marker} {:<14} {}", name, muted(visible, ui));
+    }
+    println!();
+    println!("Config path");
+    println!("  {}", path_text(&path.display().to_string(), ui));
+    println!();
+    println!("Current");
     println!("  color           {}", color_choice_name(cfg.ui.color));
-    println!("  interactive     {}", yes_no(cfg.ui.interactive));
-    println!("  animations      {}", yes_no(cfg.ui.animations));
-    println!("  bell            {}", yes_no(cfg.ui.bell));
-    println!("  fun             {}", yes_no(cfg.ui.fun));
-    println!("Output");
-    println!("  json default    {}", yes_no(cfg.output.json));
-    println!("  quiet           {}", yes_no(cfg.output.quiet));
-    println!("  verbose         {}", yes_no(cfg.output.verbose));
-    println!("Skills");
-    println!("  enabled         {}", yes_no(cfg.skills.enabled));
+    println!("  theme           {}", cfg.ui.theme);
+    println!("  animations      {}", on_off(cfg.ui.animations));
+    println!("  tui             {}", cfg.ui.tui);
+    println!("  bell            {}", on_off(cfg.ui.bell));
+    println!("  skills          {}", on_off(cfg.skills.enabled));
+    println!();
     println!(
-        "  built-ins       {}",
-        crate::cocli::tools::ToolRegistry::specs().len()
+        "{}",
+        muted("enter open · esc close · ↑/↓ move · / search", ui)
     );
-    println!("Support");
-    println!("  redact tokens   {}", yes_no(cfg.support.redact_tokens));
-    println!("  redact emails   {}", yes_no(cfg.support.redact_emails));
     Ok(())
 }
 
@@ -1722,13 +1881,31 @@ fn handle_config_get_key(key: &str, json: bool) -> Result<()> {
     print_value(json, selected)
 }
 
-fn handle_settings_ui(command: Option<SettingsUiCommands>, json: bool) -> Result<()> {
+fn handle_settings_ui(command: Option<SettingsUiCommands>, ui: Ui, json: bool) -> Result<()> {
     match command {
-        None => {
+        None => render_ui_settings(ui, json),
+        Some(SettingsUiCommands::Get { key: None }) => {
             let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
             let cfg =
                 config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
-            print_value_or_kv(json, "ui", &cfg.ui)
+            if json {
+                print_value(true, &cfg.ui)
+            } else {
+                render_ui_settings(ui, false)
+            }
+        }
+        Some(SettingsUiCommands::Get { key: Some(key) }) => {
+            handle_config_get_key(&format!("ui.{}", normalize_ui_key(&key)), json)
+        }
+        Some(SettingsUiCommands::Set { key, value }) => {
+            let key = normalize_ui_key(&key);
+            handle_config(
+                ConfigCommands::Set {
+                    key: format!("ui.{key}"),
+                    value,
+                },
+                json,
+            )
         }
         Some(SettingsUiCommands::Preview) => {
             if json {
@@ -1744,15 +1921,142 @@ fn handle_settings_ui(command: Option<SettingsUiCommands>, json: bool) -> Result
                     }),
                 )
             } else {
-                println!("{}", "theme preview".bright_cyan().bold());
-                println!("  {} success", "✓".bright_green());
-                println!("  {} warning", "!".yellow());
-                println!("  {} error", "✗".bright_red());
-                println!("  {} info", "·".bright_cyan());
-                println!("  {} command", "colab-cli status".bright_blue());
+                println!("{}", heading("Theme Preview", ui));
+                println!("  {} success", status_symbol("ready", ui));
+                println!("  {} warning", status_symbol("warn", ui));
+                println!("  {} error", status_symbol("error", ui));
+                println!("  {} info", status_symbol("info", ui));
+                println!("  {} command", command_text("colab-cli status", ui));
                 Ok(())
             }
         }
+    }
+}
+
+fn render_ui_settings(ui: Ui, json: bool) -> Result<()> {
+    let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
+    let mut cfg =
+        config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+    if json {
+        return print_value(true, &cfg.ui);
+    }
+
+    let items = ui_items(&cfg);
+    if ui.interactive {
+        let labels: Vec<_> = items
+            .iter()
+            .map(|item| format!("{} - {}", item.label, item.description))
+            .collect();
+        let defaults: Vec<_> = items.iter().map(|item| item.enabled).collect();
+        let selected =
+            dialoguer::MultiSelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                .with_prompt("UI settings")
+                .items(&labels)
+                .defaults(&defaults)
+                .interact_opt()
+                .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
+        if let Some(selected) = selected {
+            cfg.ui.color = if selected.contains(&0) {
+                config::ColorChoice::Auto
+            } else {
+                config::ColorChoice::Never
+            };
+            cfg.ui.animations = selected.contains(&1);
+            cfg.ui.bell = selected.contains(&2);
+            cfg.ui.fun = selected.contains(&3);
+            cfg.ui.compact = selected.contains(&4);
+            cfg.ui.icons = selected.contains(&5);
+            cfg.ui.unicode = selected.contains(&6);
+            cfg.ui.tui = if selected.contains(&7) {
+                "always".to_string()
+            } else if selected.contains(&8) {
+                "never".to_string()
+            } else {
+                "auto".to_string()
+            };
+            cfg.save(&path)
+                .map_err(|e| ColabError::config(e.to_string()))?;
+        }
+    }
+
+    println!("{}", heading("UI settings", ui));
+    println!("Changes are saved to config.toml");
+    println!();
+    println!("Config path");
+    println!("  {}", path_text(&path.display().to_string(), ui));
+    println!();
+    for (index, item) in ui_items(&cfg).iter().enumerate() {
+        let marker = if index == 0 { "›" } else { " " };
+        println!(
+            "{marker} [{}] {:<15} {}",
+            if item.enabled { "x" } else { " " },
+            item.label,
+            muted(item.description, ui)
+        );
+    }
+    Ok(())
+}
+
+struct UiItem {
+    label: &'static str,
+    description: &'static str,
+    enabled: bool,
+}
+
+fn ui_items(cfg: &config::CocliConfig) -> [UiItem; 9] {
+    [
+        UiItem {
+            label: "Colour",
+            description: "Friendly colour by default",
+            enabled: cfg.ui.color != config::ColorChoice::Never,
+        },
+        UiItem {
+            label: "Animations",
+            description: "Progress motion for interactive runs",
+            enabled: cfg.ui.animations,
+        },
+        UiItem {
+            label: "Terminal bell",
+            description: "Optional bell after long jobs",
+            enabled: cfg.ui.bell,
+        },
+        UiItem {
+            label: "Fun lines",
+            description: "Rare harmless lines in interactive mode",
+            enabled: cfg.ui.fun,
+        },
+        UiItem {
+            label: "Compact mode",
+            description: "Less spacing, smaller tables",
+            enabled: cfg.ui.compact,
+        },
+        UiItem {
+            label: "Icons",
+            description: "Small symbols in human output",
+            enabled: cfg.ui.icons,
+        },
+        UiItem {
+            label: "Unicode",
+            description: "Smooth borders and glyphs",
+            enabled: cfg.ui.unicode,
+        },
+        UiItem {
+            label: "TUI always",
+            description: "Prefer panels whenever possible",
+            enabled: cfg.ui.tui == "always",
+        },
+        UiItem {
+            label: "TUI never",
+            description: "Disable interactive panels",
+            enabled: cfg.ui.tui == "never",
+        },
+    ]
+}
+
+fn normalize_ui_key(key: &str) -> String {
+    match key {
+        "colour" => "color".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -1782,16 +2086,32 @@ fn color_choice_name(color: config::ColorChoice) -> &'static str {
     }
 }
 
-#[cfg(feature = "owner-tools")]
-fn owner_allowed() -> bool {
+fn maintainer_allowed() -> bool {
+    if std::env::var_os("COLAB_CLI_MAINTAINER").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        return true;
+    }
     let allowed = std::env::var("COLAB_CLI_OWNER").unwrap_or_else(|_| "keys".to_string());
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_default();
-    user == allowed
+    if user == allowed {
+        return true;
+    }
+    git_identity_is_maintainer()
 }
 
-fn handle_skills(cmd: SkillCommands, _ui: Ui, json: bool) -> Result<()> {
+fn git_identity_is_maintainer() -> bool {
+    let email = Command::new("git")
+        .args(["config", "user.email"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .unwrap_or_default();
+    email.ends_with("@users.noreply.github.com") && email.contains("keys-i")
+}
+
+fn handle_skills(cmd: SkillCommands, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         SkillCommands::List {
             json: local_json,
@@ -1811,20 +2131,26 @@ fn handle_skills(cmd: SkillCommands, _ui: Ui, json: bool) -> Result<()> {
             if json || local_json {
                 print_value(true, &rows)
             } else {
+                println!("{}", heading("Skills", ui));
+                println!("Agent-friendly tools and optional integrations");
+                println!();
                 println!(
-                    "{:<20} {:<6} {:<10} {:<13} Summary",
-                    "Skill", "Risk", "Scope", "Needs session"
+                    "{:<18} {:<10} {:<8} {:<9} {:<9} Summary",
+                    "Skill", "Scope", "Risk", "Session", "Network"
                 );
                 for row in rows {
                     println!(
-                        "{:<20} {:<6} {:<10} {:<13} {}",
+                        "{:<18} {:<10} {:<8} {:<9} {:<9} {}",
                         row.name,
-                        row.risk,
                         row.scope,
+                        row.risk,
                         yes_no(row.needs_session),
+                        yes_no(row.network),
                         row.summary
                     );
                 }
+                println!();
+                println!("{}", muted("enter inspect · / search · esc close", ui));
                 Ok(())
             }
         }
@@ -1839,18 +2165,23 @@ fn handle_skills(cmd: SkillCommands, _ui: Ui, json: bool) -> Result<()> {
             if json || local_json {
                 print_value(true, &row)
             } else {
-                println!("Skill");
-                println!("  name            {}", row.name);
+                println!("{}", heading(&format!("Skill {}", row.name), ui));
+                println!("  summary         {}", row.summary);
                 println!("  scope           {}", row.scope);
                 println!("  risk            {}", row.risk);
-                println!("  needs session   {}", yes_no(row.needs_session));
+                println!("  session         {}", yes_no(row.needs_session));
                 println!("  network         {}", yes_no(row.network));
-                println!("  dry-run         {}", yes_no(row.dry_run));
-                println!("  summary         {}", row.summary);
-                println!(
-                    "  example         colab-cli settings skills run {} --json-input '{{}}'",
-                    row.name
-                );
+                println!("  inputs          {}", row.inputs.join(", "));
+                println!("  outputs         {}", row.outputs.join(", "));
+                println!("  examples");
+                for example in &row.examples {
+                    println!("    {}", command_text(example, ui));
+                }
+                println!("  safety notes");
+                for note in &row.safety_notes {
+                    println!("    {}", muted(note, ui));
+                }
+                println!("  json schema     {}", row.json_schema);
                 Ok(())
             }
         }
@@ -1860,8 +2191,7 @@ fn handle_skills(cmd: SkillCommands, _ui: Ui, json: bool) -> Result<()> {
             yes,
         } => {
             let input: serde_json::Value = serde_json::from_str(&input_json)?;
-            let output = crate::cocli::tools::ToolRegistry::run_plan(&name, input, yes)
-                .map_err(|e| ColabError::config(e.to_string()))?;
+            let output = run_skill_plan(&name, input, yes)?;
             print_value(true, &output)
         }
         SkillCommands::Enable { name } | SkillCommands::Disable { name } => {
@@ -1869,68 +2199,284 @@ fn handle_skills(cmd: SkillCommands, _ui: Ui, json: bool) -> Result<()> {
                 "skill toggles are not implemented; built-in skill `{name}` is always available"
             )))
         }
+        SkillCommands::Mcp { stdio } => {
+            let data = serde_json::json!({
+                "stdio": stdio,
+                "tools": skill_rows(None, None, false).into_iter().map(|row| row.name).collect::<Vec<_>>(),
+                "note": "MCP stdio is a stable JSON tool listing here; transport server is not started by default"
+            });
+            print_value(json, &data)
+        }
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct SkillRow {
-    name: String,
-    scope: String,
-    category: String,
+    name: &'static str,
+    scope: &'static str,
+    category: &'static str,
     risk: &'static str,
     needs_session: bool,
     network: bool,
-    dry_run: bool,
-    summary: String,
+    summary: &'static str,
+    inputs: Vec<&'static str>,
+    outputs: Vec<&'static str>,
+    examples: Vec<&'static str>,
+    safety_notes: Vec<&'static str>,
+    json_schema: serde_json::Value,
 }
 
 fn skill_rows(category: Option<&str>, risk: Option<&str>, needs_session: bool) -> Vec<SkillRow> {
-    crate::cocli::tools::ToolRegistry::specs()
+    agent_skill_rows()
         .into_iter()
-        .map(|spec| {
-            let category = spec.name.split('.').next().unwrap_or("misc").to_string();
-            SkillRow {
-                name: spec.name,
-                scope: category.clone(),
-                category,
-                risk: display_risk(spec.risk),
-                needs_session: spec.requires_session,
-                network: spec.requires_network,
-                dry_run: spec.dry_run,
-                summary: sentence_case(&spec.description),
-            }
-        })
         .filter(|row| category.is_none_or(|want| row.category == want))
         .filter(|row| risk.is_none_or(|want| row.risk == want))
         .filter(|row| !needs_session || row.needs_session)
         .collect()
 }
 
-fn display_risk(risk: crate::cocli::r#continue::manifest::RiskLevel) -> &'static str {
-    match risk {
-        crate::cocli::r#continue::manifest::RiskLevel::Low => "low",
-        crate::cocli::r#continue::manifest::RiskLevel::Network => "medium",
-        crate::cocli::r#continue::manifest::RiskLevel::Destructive => "high",
+fn agent_skill_rows() -> Vec<SkillRow> {
+    vec![
+        skill(
+            "slurp.plan",
+            "workflow",
+            "low",
+            false,
+            false,
+            "Explain a slurp.toml plan",
+            &["config"],
+            &["plan", "findings"],
+            &["colab-cli slurp plan --json"],
+            &["Local read only"],
+        ),
+        skill(
+            "slurp.explain",
+            "workflow",
+            "low",
+            false,
+            false,
+            "Render a clean Slurp plan explanation",
+            &["config"],
+            &["summary"],
+            &["colab-cli slurp explain --json"],
+            &["Local read only"],
+        ),
+        skill(
+            "fleet.plan",
+            "fleet",
+            "med",
+            false,
+            false,
+            "Plan approved runtime work",
+            &["config", "cost"],
+            &["plan", "compliance"],
+            &["colab-cli fleet plan --json"],
+            &["No quota bypass", "No hidden execution"],
+        ),
+        skill(
+            "fleet.status",
+            "fleet",
+            "low",
+            false,
+            false,
+            "Show fleet planning status",
+            &["config"],
+            &["status"],
+            &["colab-cli status fleet --json"],
+            &["Local read only"],
+        ),
+        skill(
+            "continue.save",
+            "state",
+            "low",
+            true,
+            false,
+            "Save checkpoint metadata",
+            &["session", "name", "artifacts"],
+            &["manifest"],
+            &["colab-cli continue save --session work --name run-a"],
+            &["Does not copy live Python memory"],
+        ),
+        skill(
+            "continue.resume",
+            "state",
+            "med",
+            false,
+            true,
+            "Resume from checkpoint metadata",
+            &["name", "dry_run"],
+            &["resume_plan"],
+            &["colab-cli continue resume run-a --dry-run --json"],
+            &["Network work requires explicit command flags"],
+        ),
+        skill(
+            "runtime.inspect",
+            "runtime",
+            "low",
+            true,
+            true,
+            "Inspect runtime metadata",
+            &["session"],
+            &["runtime"],
+            &["colab-cli status runtime --all --json"],
+            &["No package installs"],
+        ),
+        skill(
+            "fs.diff",
+            "files",
+            "low",
+            true,
+            true,
+            "Compare local and remote trees",
+            &["local", "remote"],
+            &["diff"],
+            &["colab-cli fs diff ./src /content/src --json"],
+            &["Destructive sync requires separate confirmation"],
+        ),
+        skill(
+            "support.bug-report",
+            "support",
+            "low",
+            false,
+            false,
+            "Write a redacted diagnostic bundle",
+            &["show_private"],
+            &["bundle"],
+            &["colab-cli settings support bug-report --json"],
+            &["Secrets are redacted by default"],
+        ),
+        skill(
+            "mcp.tools",
+            "agent",
+            "low",
+            false,
+            false,
+            "List MCP-compatible tool metadata",
+            &[],
+            &["tools"],
+            &["colab-cli settings skills mcp --json"],
+            &["No transport server starts unless requested"],
+        ),
+        skill(
+            "mcp.invoke",
+            "agent",
+            "med",
+            false,
+            false,
+            "Plan a built-in tool invocation from JSON",
+            &["name", "input"],
+            &["planned_command"],
+            &["colab-cli settings skills run slurp.plan --json-input '{}'"],
+            &["Plans are inspectable before execution"],
+        ),
+        skill(
+            "agent.plan",
+            "agent",
+            "low",
+            false,
+            false,
+            "Draft an explicit agent plan",
+            &["goal"],
+            &["plan"],
+            &["colab-cli settings skills inspect agent.plan"],
+            &["No autonomous execution"],
+        ),
+        skill(
+            "agent.audit",
+            "agent",
+            "low",
+            false,
+            false,
+            "Check a plan before running it",
+            &["plan"],
+            &["findings"],
+            &["colab-cli settings skills inspect agent.audit"],
+            &["Destructive actions require confirmation"],
+        ),
+    ]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn skill(
+    name: &'static str,
+    scope: &'static str,
+    risk: &'static str,
+    needs_session: bool,
+    network: bool,
+    summary: &'static str,
+    inputs: &[&'static str],
+    outputs: &[&'static str],
+    examples: &[&'static str],
+    safety_notes: &[&'static str],
+) -> SkillRow {
+    SkillRow {
+        name,
+        scope,
+        category: scope,
+        risk,
+        needs_session,
+        network,
+        summary,
+        inputs: inputs.to_vec(),
+        outputs: outputs.to_vec(),
+        examples: examples.to_vec(),
+        safety_notes: safety_notes.to_vec(),
+        json_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": true
+        }),
     }
 }
 
-fn sentence_case(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
+fn run_skill_plan(
+    name: &str,
+    input: serde_json::Value,
+    yes: bool,
+) -> Result<crate::cocli::r#continue::manifest::ToolOutput> {
+    if name == "mcp.tools" {
+        return Ok(crate::cocli::r#continue::manifest::ToolOutput {
+            tool: name.to_string(),
+            status: "planned".to_string(),
+            data: serde_json::json!({ "tools": skill_rows(None, None, false) }),
+            audit: vec!["listed skill catalog".to_string()],
+        });
     }
+    if name == "mcp.invoke" {
+        let tool = input
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| ColabError::config("mcp.invoke needs input.name"))?;
+        let nested = input
+            .get("input")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        return run_skill_plan(tool, nested, yes);
+    }
+    crate::cocli::tools::ToolRegistry::run_plan(name, input, yes)
+        .map_err(|e| ColabError::config(e.to_string()))
 }
 
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
+fn on_off(value: bool) -> &'static str {
+    if value { "on" } else { "off" }
+}
+
+fn muted(text: &str, ui: Ui) -> String {
+    if ui.plain {
+        text.to_string()
+    } else {
+        text.dimmed().to_string()
+    }
+}
+
 fn handle_fleet(cmd: FleetCommands, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         FleetCommands::Plan(args) => {
             let (cfg, plan, findings) = fleet_plan_from_args(&args)?;
-            print_fleet_plan(&cfg, &plan, &findings, json || args.cost)
+            print_fleet_plan(&cfg, &plan, &findings, json)
         }
         FleetCommands::Start(args) | FleetCommands::Exec(args) => {
             let (cfg, plan, findings) = fleet_plan_from_args(&args)?;
@@ -2026,7 +2572,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
     }
 }
 
-#[cfg(feature = "owner-tools")]
+#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
 fn handle_release(cmd: ReleaseCommands, json: bool) -> Result<()> {
     match cmd {
         ReleaseCommands::Name { version } => {
@@ -2302,8 +2848,15 @@ fn handle_config(cmd: ConfigCommands, json: bool) -> Result<()> {
                 }
                 "ui.compact" => cfg.ui.compact = parse_bool(&value)?,
                 "ui.fun" => cfg.ui.fun = parse_bool(&value)?,
-                "ui.interactive" => cfg.ui.interactive = parse_bool(&value)?,
+                "ui.icons" => cfg.ui.icons = parse_bool(&value)?,
+                "ui.neon" => cfg.ui.neon = parse_bool(&value)?,
                 "ui.theme" => cfg.ui.theme = value,
+                "ui.tui" => {
+                    if !matches!(value.as_str(), "auto" | "always" | "never") {
+                        return Err(ColabError::config("ui.tui must be auto, always, or never"));
+                    }
+                    cfg.ui.tui = value;
+                }
                 "ui.unicode" => cfg.ui.unicode = parse_bool(&value)?,
                 "output.json" => cfg.output.json = parse_bool(&value)?,
                 "output.quiet" => cfg.output.quiet = parse_bool(&value)?,
@@ -2313,9 +2866,10 @@ fn handle_config(cmd: ConfigCommands, json: bool) -> Result<()> {
                 "support.redact_paths" => cfg.support.redact_paths = parse_bool(&value)?,
                 "support.redact_emails" => cfg.support.redact_emails = parse_bool(&value)?,
                 "support.redact_tokens" => cfg.support.redact_tokens = parse_bool(&value)?,
+                "dev.enabled" => cfg.dev.enabled = parse_bool(&value)?,
                 _ => {
                     return Err(ColabError::config(
-                        "supported settings keys include ui.theme, ui.color, ui.interactive, ui.animations, ui.bell, ui.fun, output.json, skills.enabled, and support.redact_tokens",
+                        "supported settings keys include ui.theme, ui.color, ui.animations, ui.tui, ui.bell, ui.fun, ui.icons, output.json, skills.enabled, support.redact_tokens, and dev.enabled",
                     ));
                 }
             }
@@ -2521,23 +3075,34 @@ fn handle_fs_sync(args: FsSyncArgs, ui: Ui, json: bool) -> Result<()> {
         ));
     }
     let plan = local_sync_plan(&args.local, &args.include, &args.exclude, args.delete)?;
-    if args.explain && !json {
+    if json {
+        return print_value(true, &plan);
+    }
+    if args.explain {
         println!("fs sync dry-run");
         println!("local: {}", args.local);
         println!("remote: {}", args.remote);
         println!("upload: {} file(s)", plan.upload.len());
         println!("delete remote: {} file(s)", plan.delete_remote.len());
         println!("unchanged: {} file(s)", plan.unchanged);
-    } else if !json {
+    } else {
         ui.success("sync dry-run planned");
+        println!("upload: {} file(s)", plan.upload.len());
+        println!("delete remote: {} file(s)", plan.delete_remote.len());
+        println!("unchanged: {} file(s)", plan.unchanged);
     }
-    println!("{}", serde_json::to_string_pretty(&plan)?);
     Ok(())
 }
 
-fn handle_fs_diff(args: FsDiffArgs, _ui: Ui) -> Result<()> {
+fn handle_fs_diff(args: FsDiffArgs, _ui: Ui, json: bool) -> Result<()> {
     let plan = local_sync_plan(&args.local, &args.include, &args.exclude, false)?;
-    println!("{}", serde_json::to_string_pretty(&plan)?);
+    if json {
+        return print_value(true, &plan);
+    }
+    println!("fs diff");
+    println!("upload: {} file(s)", plan.upload.len());
+    println!("delete remote: {} file(s)", plan.delete_remote.len());
+    println!("unchanged: {} file(s)", plan.unchanged);
     Ok(())
 }
 
@@ -2981,7 +3546,7 @@ async fn do_assign(
         Ok(outcome) => {
             Ui::spinner_done(pb, "Assigned");
             println!();
-            ui.success(&format!("runtime warmed up: {}", outcome.server.label));
+            ui.success("runtime warmed up");
             if outcome.shape_mismatch {
                 ui.warn(&format!(
                     "Requested {} but Colab provisioned {}. Your account tier may not allow {} shape.",
@@ -2991,6 +3556,31 @@ async fn do_assign(
                 ));
             }
             ui.print_server_status(&outcome.server);
+            if !ui.quiet {
+                println!();
+                println!("{}", heading("Next", *ui));
+                println!(
+                    "  {}",
+                    command_text(
+                        &format!(
+                            "colab-cli run py --code \"print('hello')\" --session \"{}\"",
+                            outcome.server.label
+                        ),
+                        *ui
+                    )
+                );
+                println!(
+                    "  {}",
+                    command_text(
+                        &format!(
+                            "colab-cli fs drive mount --session \"{}\"",
+                            outcome.server.label
+                        ),
+                        *ui
+                    )
+                );
+                println!("  {}", command_text("colab-cli status runtime --all", *ui));
+            }
             Ok(outcome.server)
         }
         Err(e) => {

@@ -24,7 +24,10 @@ fn parses_major_command_spaces() {
         ["colab-cli", "slurp", "explain"].as_slice(),
         ["colab-cli", "fleet", "plan"].as_slice(),
         ["colab-cli", "settings", "skills", "list"].as_slice(),
-        ["colab-cli", "settings", "skills", "inspect", "session.new"].as_slice(),
+        ["colab-cli", "settings", "skills", "inspect", "slurp.plan"].as_slice(),
+        ["colab-cli", "settings", "skills", "mcp"].as_slice(),
+        ["colab-cli", "settings", "ui", "get"].as_slice(),
+        ["colab-cli", "settings", "ui", "set", "animations", "false"].as_slice(),
         ["colab-cli", "settings", "ui", "preview"].as_slice(),
         ["colab-cli", "settings", "support", "bug-report"].as_slice(),
         ["colab-cli", "continue", "last"].as_slice(),
@@ -82,7 +85,7 @@ fn json_output_has_no_ansi() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(!stdout.contains("\x1b["));
-    assert!(stdout.contains("next_action"));
+    assert!(stdout.contains("next_actions"));
 }
 
 #[test]
@@ -125,7 +128,7 @@ fn docs_exist() {
         "docs/ui.md",
         "docs/settings.md",
         "docs/skills.md",
-        "docs/owner-tools.md",
+        "docs/maintainer.md",
         "docs/feature-test-plan.md",
         "docs/live-testing.md",
         "plan.md",
@@ -152,11 +155,14 @@ fn settings_skills_list_is_catalog_not_debug_rows() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("Skill"));
-    assert!(stdout.contains("session.new"));
-    assert!(stdout.contains("run.python"));
     assert!(stdout.contains("slurp.plan"));
+    assert!(stdout.contains("slurp.explain"));
     assert!(stdout.contains("fleet.plan"));
+    assert!(stdout.contains("mcp.tools"));
     assert!(stdout.contains("agent.audit"));
+    assert!(!stdout.contains("session.new"));
+    assert!(!stdout.contains("run.python"));
+    assert!(!stdout.contains("fs.push"));
     assert!(!stdout.contains("session_new"));
     assert!(!stdout.contains("session=false"));
 }
@@ -184,30 +190,55 @@ fn settings_default_renders_sections() {
     let out = bin().arg("settings").output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("cocli settings"));
+    assert!(stdout.contains("Settings"));
     assert!(stdout.contains("General"));
     assert!(stdout.contains("UI"));
     assert!(stdout.contains("Skills"));
     assert!(!stdout.trim_start().starts_with('{'));
 }
 
-#[cfg(feature = "owner-tools")]
 #[test]
-fn owner_release_is_feature_gated_and_user_gated() {
+fn settings_ui_set_persists_in_temp_config() {
+    let home = tempfile::tempdir().unwrap();
+    let set = bin()
+        .env("HOME", home.path())
+        .args(["settings", "ui", "set", "animations", "false"])
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    let get = bin()
+        .env("HOME", home.path())
+        .args(["settings", "ui", "get", "animations"])
+        .output()
+        .unwrap();
+    assert!(get.status.success());
+    let stdout = String::from_utf8(get.stdout).unwrap();
+    assert_eq!(stdout.trim(), "false");
+}
+
+#[cfg(any(debug_assertions, feature = "dev-tools", feature = "owner-tools"))]
+#[test]
+fn dev_release_is_maintainer_gated() {
+    let home = tempfile::tempdir().unwrap();
     let blocked = bin()
+        .env("HOME", home.path())
         .env("USER", "not-keys")
         .env("COLAB_CLI_OWNER", "keys")
-        .args(["settings", "owner", "release", "name"])
+        .env_remove("COLAB_CLI_MAINTAINER")
+        .args(["settings", "dev", "release", "name"])
         .output()
         .unwrap();
     assert!(!blocked.status.success());
     let stderr = String::from_utf8(blocked.stderr).unwrap();
-    assert!(stderr.contains("owner tools are disabled for this user"));
+    assert!(stderr.contains("private maintainer command"));
 
     let allowed = bin()
-        .env("USER", "keys")
+        .env("HOME", home.path())
+        .env("USER", "not-keys")
         .env("COLAB_CLI_OWNER", "keys")
-        .args(["settings", "owner", "release", "name"])
+        .env("COLAB_CLI_MAINTAINER", "1")
+        .args(["settings", "dev", "release", "name"])
         .output()
         .unwrap();
     assert!(allowed.status.success());

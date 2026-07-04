@@ -91,7 +91,9 @@ Production commands:
 - `settings reset`
 - `settings skills list`
 - `settings skills list --json`
-- `settings skills inspect session.new`
+- `settings skills inspect slurp.plan`
+- `settings ui get`
+- `settings ui set animations false`
 - `completions bash`
 - `completions zsh`
 - `completions fish`

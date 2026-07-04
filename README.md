@@ -20,7 +20,7 @@ Built-in skills are visible through settings:
 
 ```sh
 colab-cli settings skills list
-colab-cli settings skills inspect run.notebook
+colab-cli settings skills inspect slurp.plan
 ```
 
 Continuation bundle:
@@ -87,7 +87,7 @@ src/
     continue/
     tools/
     config/
-    release/    owner-tools feature only
+    release/    private maintainer helpers
     ui/
     util/
 ```
@@ -134,7 +134,6 @@ Research notes live in [docs/research.md](docs/research.md). The current build p
 - [UI](docs/ui.md)
 - [Settings](docs/settings.md)
 - [Skills](docs/skills.md)
-- [Owner tools](docs/owner-tools.md)
 - [Feature test plan](docs/feature-test-plan.md)
 - [Live testing](docs/live-testing.md)
 - [Easter eggs](docs/easter-eggs.md)
@@ -146,6 +145,8 @@ Research notes live in [docs/research.md](docs/research.md). The current build p
 - [Claims ledger](docs/claims-ledger.md)
 - [Competitor matrix](docs/competitor-matrix.md)
 - [Output style](docs/output-style.md)
+- [Perf pass](docs/perf-pass.md)
+- [QA](docs/qa.md)
 - [Usability study](docs/usability-study.md)
 - [Publishing](docs/publishing.md)
 - [Release](docs/release.md)

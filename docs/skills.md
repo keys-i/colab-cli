@@ -1,6 +1,6 @@
 # Skills
 
-Skills are built-in command plans exposed through settings. They are for discovery and agent-friendly JSON, not external plugin loading.
+Skills are optional agent/tool surfaces exposed through settings. Core product work stays in normal commands.
 
 ```sh
 colab-cli settings skills list
@@ -11,13 +11,14 @@ colab-cli settings skills run slurp.plan --json-input '{}'
 Human output is a small catalog:
 
 ```text
-Skill                Risk   Scope      Needs session Summary
-session.new          med    session    no            Start a runtime
-run.python           med    run        yes           Run Python code
-fs.sync              med    fs         yes           Plan file sync changes
-slurp.plan           low    slurp      no            Explain a Slurp plan
-fleet.plan           med    fleet      no            Plan approved runtimes
-agent.audit          low    agent      no            Audit an agent plan
+Skill              Scope      Risk     Session   Network   Summary
+slurp.plan         workflow   low      no        no        Explain a slurp.toml plan
+slurp.explain      workflow   low      no        no        Render a clean Slurp plan explanation
+fleet.plan         fleet      med      no        no        Plan approved runtime work
+continue.resume    state      med      no        yes       Resume from checkpoint metadata
+fs.diff            files      low      yes       yes       Compare local and remote trees
+mcp.tools          agent      low      no        no        List MCP-compatible tool metadata
+agent.audit        agent      low      no        no        Check a plan before running it
 ```
 
 JSON output keeps stable field names:
@@ -25,14 +26,13 @@ JSON output keeps stable field names:
 ```json
 [
   {
-    "name": "session.new",
-    "scope": "session",
-    "category": "session",
-    "risk": "medium",
+    "name": "slurp.plan",
+    "scope": "workflow",
+    "category": "workflow",
+    "risk": "low",
     "needs_session": false,
-    "network": true,
-    "dry_run": true,
-    "summary": "Create a Colab session"
+    "network": false,
+    "summary": "Explain a slurp.toml plan"
   }
 ]
 ```
