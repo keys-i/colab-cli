@@ -13,6 +13,7 @@ pub mod kernel;
 pub mod mount;
 pub mod release;
 pub mod runtime;
+pub mod secrets;
 pub mod session;
 pub mod slurp;
 pub mod tools;

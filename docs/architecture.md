@@ -26,6 +26,7 @@ src/cocli/
   slurp/      internal recipe TOML parsing
   fleet/      internal distribute compliance and scheduler planning
   continue/   continuation manifest and resume planning
+  secrets.rs  explicit local secret injection and redaction
   tools/      built-in registry shown through settings skills
   config/     config files behind settings
   release/    deterministic release naming internals
@@ -40,3 +41,4 @@ Invariants:
 - destructive commands need explicit confirmation
 - continuation is checkpoint/replay, not live Python memory transfer
 - distribute mode is planning for approved runtimes, not quota bypass
+- secret values are explicit per run and never stored in config.toml

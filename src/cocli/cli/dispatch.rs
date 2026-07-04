@@ -14,10 +14,10 @@ use crate::cocli::cli::{
     FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, JuliaCommands,
     JuliaPkgCommands, KernelActionArgs, KernelSessionArg, LogCommands, MountCommands, PipCommands,
     PkgCommands, RCommands, RPkgCommands, RenvCommands, RunCommands, RuntimeCommands,
-    ServerCommands, SessionCommands, SessionKernelCommands, SessionLogsArgs, SessionNameArg,
-    SessionNewArgs, SettingsBillingCommands, SettingsCommands, SettingsExperimentsCommands,
-    SettingsUiCommands, SettingsUpdateCommands, SkillCommands, SlurpCommands, StatusCommands,
-    SupportCommands, ToolsCommands,
+    SecretCommands, ServerCommands, SessionCommands, SessionKernelCommands, SessionLogsArgs,
+    SessionNameArg, SessionNewArgs, SettingsBillingCommands, SettingsCommands,
+    SettingsExperimentsCommands, SettingsUiCommands, SettingsUpdateCommands, SkillCommands,
+    SlurpCommands, StatusCommands, SupportCommands, ToolsCommands,
 };
 #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 use crate::cocli::cli::{DevCommands, ReleaseCommands};
@@ -26,6 +26,7 @@ use crate::cocli::debug::{self, Verbosity};
 use crate::cocli::error::{ColabError, Result};
 use crate::cocli::exec::runner;
 use crate::cocli::kernel::{self, KernelInfoSummary, KernelLanguage};
+use crate::cocli::secrets::{self, SecretBundle, SecretCliArgs};
 use crate::cocli::session::ServerManager;
 use crate::cocli::session::client::ColabClient;
 use crate::cocli::session::model::{JupyterKernel, KernelSpecResponse, Session, Shape, Variant};
@@ -573,6 +574,15 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
             Some(AiCommands::Code { .. }) => "ai.code",
             _ => "ai",
         },
+        Some(Commands::Secret { command }) => match command {
+            SecretCommands::List => "secret.list",
+            SecretCommands::Set { .. } => "secret.set",
+            SecretCommands::Unset { .. } => "secret.unset",
+            SecretCommands::Inject { .. } => "secret.inject",
+            SecretCommands::Status => "secret.status",
+            SecretCommands::Doctor => "secret.doctor",
+            SecretCommands::ExportRedacted => "secret.export-redacted",
+        },
         Some(Commands::Auth { command }) => match command {
             AuthCommands::Login { method } if method == "adc" => "auth.login.adc",
             AuthCommands::Login { .. } => "auth.login.oauth2",
@@ -614,6 +624,16 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
     }
 
     let json = cli.json;
+    let secret_args = SecretCliArgs {
+        env: cli.secret_env.clone(),
+        env_file: cli.secret_env_file.clone(),
+        secret: cli.secret.clone(),
+    };
+    if !secret_args.is_empty() && !matches!(&cli.command, Some(Commands::Run { .. })) {
+        return Err(ColabError::config(
+            "secret injection flags only work with colab run",
+        ));
+    }
     debug::debug1(format!("command {}", command_namespace(&cli.command)));
     match cli.command {
         None => handle_launcher(ui),
@@ -624,12 +644,13 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         }
         Some(Commands::Run { command }) => {
             let config = load_colab_config(cli.quiet)?;
-            handle_run_space(command, &config, ui, cli.json).await
+            handle_run_space(command, &config, ui, cli.json, secret_args).await
         }
         Some(Commands::Exec { command }) => {
             migration(&ui, "colab run ...");
             let config = load_colab_config(cli.quiet)?;
-            handle_exec(command, &config, ui).await
+            let no_secrets = SecretBundle::default();
+            handle_exec(command, &config, ui, &no_secrets).await
         }
         Some(Commands::Fs { command }) => {
             let config = load_colab_config(cli.quiet)?;
@@ -643,7 +664,8 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         Some(Commands::Env { command }) => {
             migration(&ui, "colab run pip install/freeze/restore");
             let config = load_colab_config(cli.quiet)?;
-            handle_env(command, &config, ui).await
+            let no_secrets = SecretBundle::default();
+            handle_env(command, &config, ui, &no_secrets).await
         }
         Some(Commands::Runtime { command }) => {
             migration(&ui, runtime_migration_target(&command));
@@ -686,6 +708,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         }
         Some(Commands::Distribute { command }) => handle_distribute(command, ui, json),
         Some(Commands::Ai { command }) => handle_ai(command, ui, json),
+        Some(Commands::Secret { command }) => handle_secret(command, ui, json),
         Some(Commands::Slurp { command }) => {
             migration(&ui, "colab distribute recipe ...");
             require_experiment("distribute", |cfg| cfg.experiments.distribute)?;
@@ -1912,10 +1935,12 @@ async fn handle_run_space(
     config: &ColabConfig,
     ui: Ui,
     json: bool,
+    secret_args: SecretCliArgs,
 ) -> Result<()> {
+    let secret_bundle = resolve_secret_bundle(&secret_args, ui, json)?;
     match cmd {
         RunCommands::Code { session, code } => {
-            handle_run_code(config, ui, session, code, json).await
+            handle_run_code(config, ui, session, code, json, &secret_bundle).await
         }
         RunCommands::Script {
             script,
@@ -1935,11 +1960,18 @@ async fn handle_run_space(
                 },
                 config,
                 ui,
+                &secret_bundle,
             )
             .await
         }
         RunCommands::Py { session, code } => {
-            handle_exec(ExecCommands::Py { session, code }, config, ui).await
+            handle_exec(
+                ExecCommands::Py { session, code },
+                config,
+                ui,
+                &secret_bundle,
+            )
+            .await
         }
         RunCommands::Notebook {
             notebook,
@@ -1959,17 +1991,24 @@ async fn handle_run_space(
                 },
                 config,
                 ui,
+                &secret_bundle,
             )
             .await
         }
-        RunCommands::Repl { session } => handle_repl(config, ui, session, json).await,
-        RunCommands::Shell { session } => {
-            handle_exec(ExecCommands::Shell { session }, config, ui).await
+        RunCommands::Repl { session } => {
+            handle_repl(config, ui, session, json, &secret_bundle).await
         }
-        RunCommands::Pip { command } => handle_run_pip(command, config, ui).await,
-        RunCommands::Pkg { command } => handle_run_pkg(command, config, ui, json).await,
-        RunCommands::Julia { command } => handle_run_julia(command, config, ui, json).await,
-        RunCommands::R { command } => handle_run_r(command, config, ui, json).await,
+        RunCommands::Shell { session } => {
+            handle_exec(ExecCommands::Shell { session }, config, ui, &secret_bundle).await
+        }
+        RunCommands::Pip { command } => handle_run_pip(command, config, ui, &secret_bundle).await,
+        RunCommands::Pkg { command } => {
+            handle_run_pkg(command, config, ui, json, &secret_bundle).await
+        }
+        RunCommands::Julia { command } => {
+            handle_run_julia(command, config, ui, json, &secret_bundle).await
+        }
+        RunCommands::R { command } => handle_run_r(command, config, ui, json, &secret_bundle).await,
         RunCommands::Ast { file, json } => {
             require_experiment("AST observer", |cfg| cfg.experiments.ast_observer)?;
             print_code_outline(&file, json)
@@ -1992,6 +2031,7 @@ async fn handle_run_space(
                 },
                 config,
                 ui,
+                &secret_bundle,
             )
             .await
         }
@@ -2014,15 +2054,22 @@ async fn handle_run_space(
                     },
                     config,
                     ui,
+                    &secret_bundle,
                 )
                 .await
             } else {
-                handle_env(EnvCommands::Install { packages, session }, config, ui).await
+                handle_env(
+                    EnvCommands::Install { packages, session },
+                    config,
+                    ui,
+                    &secret_bundle,
+                )
+                .await
             }
         }
         RunCommands::Freeze { session } => {
             migration(&ui, "colab run pip freeze");
-            handle_env(EnvCommands::Freeze { session }, config, ui).await
+            handle_env(EnvCommands::Freeze { session }, config, ui, &secret_bundle).await
         }
         RunCommands::Restore {
             requirements,
@@ -2036,11 +2083,12 @@ async fn handle_run_space(
                 },
                 config,
                 ui,
+                &secret_bundle,
             )
             .await
         }
         RunCommands::Last { confirm } => {
-            handle_exec(ExecCommands::Last { confirm }, config, ui).await
+            handle_exec(ExecCommands::Last { confirm }, config, ui, &secret_bundle).await
         }
         RunCommands::History => Err(ColabError::config(
             "run history has no command store yet - rerun commands explicitly",
@@ -2054,24 +2102,66 @@ async fn handle_run_code(
     session: Option<String>,
     code: String,
     json: bool,
+    secrets: &SecretBundle,
 ) -> Result<()> {
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
     let server = resolve_server(&servers, session.as_deref())?;
     let server = ensure_fresh_token(&manager, server, &ui).await?;
     let (_view, kernel_session) = active_kernel_session(&manager, &server).await?;
-    let output = runner::execute_colab_cell_in_session(
+    let output = runner::execute_colab_cell_in_session_with_secrets(
         manager.client(),
         &server,
         &kernel_session,
         &code,
         std::time::Duration::from_secs(60),
+        secrets,
     )
     .await?;
     print_repl_output(&output, json)
 }
 
-async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+fn resolve_secret_bundle(args: &SecretCliArgs, ui: Ui, json: bool) -> Result<SecretBundle> {
+    if args.is_empty() {
+        return Ok(SecretBundle::default());
+    }
+    require_experiment("secrets bridge", |cfg| cfg.experiments.secrets_bridge)?;
+    let cfg = load_cocli_config()?;
+    if !args.env.is_empty() && !cfg.secrets.allow_env {
+        return Err(ColabError::config(
+            "secret env injection is disabled in settings",
+        ));
+    }
+    if !args.env_file.is_empty() && !cfg.secrets.allow_env_file {
+        return Err(ColabError::config(
+            "secret env-file injection is disabled in settings",
+        ));
+    }
+    let bundle = secrets::resolve_from_process_env(args)?;
+    if !bundle.is_empty() && !json && !ui.quiet {
+        println!("Secrets");
+        println!("{}", rule(ui));
+        println!();
+        for (key, source) in bundle.rows() {
+            println!("✓ {:<14} from {source}", key);
+        }
+        println!("· bridge          userdata.get enabled");
+        println!();
+        if !ui.quiet && args.env.iter().any(|spec| spec.contains('=')) {
+            eprintln!(
+                "warning: passing secrets as CLI arguments can leak through shell history; prefer --env KEY or --prompt"
+            );
+        }
+    }
+    Ok(bundle)
+}
+
+async fn handle_run_pip(
+    cmd: PipCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    secrets: &SecretBundle,
+) -> Result<()> {
     let session_hint = match &cmd {
         PipCommands::Install { session, .. }
         | PipCommands::Freeze { session }
@@ -2101,14 +2191,21 @@ async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Resul
                     },
                     config,
                     ui,
+                    secrets,
                 )
                 .await
             } else {
-                handle_env(EnvCommands::Install { packages, session }, config, ui).await
+                handle_env(
+                    EnvCommands::Install { packages, session },
+                    config,
+                    ui,
+                    secrets,
+                )
+                .await
             }
         }
         PipCommands::Freeze { session } => {
-            handle_env(EnvCommands::Freeze { session }, config, ui).await
+            handle_env(EnvCommands::Freeze { session }, config, ui, secrets).await
         }
         PipCommands::Restore {
             requirements,
@@ -2121,6 +2218,7 @@ async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Resul
                 },
                 config,
                 ui,
+                secrets,
             )
             .await
         }
@@ -2130,6 +2228,7 @@ async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Resul
                 ui,
                 session,
                 vec!["python".into(), "-m".into(), "pip".into(), "check".into()],
+                secrets,
             )
             .await
         }
@@ -2139,6 +2238,7 @@ async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Resul
                 ui,
                 session,
                 vec!["python".into(), "-m".into(), "pip".into(), "list".into()],
+                secrets,
             )
             .await
         }
@@ -2148,6 +2248,7 @@ async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Resul
                 ui,
                 session,
                 vec!["python".into(), "-m".into(), "pip".into(), "list".into()],
+                secrets,
             )
             .await
         }
@@ -2163,28 +2264,35 @@ async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Resul
                     "cache".into(),
                     "info".into(),
                 ],
+                secrets,
             )
             .await
         }
     }
 }
 
-async fn handle_run_pkg(cmd: PkgCommands, config: &ColabConfig, ui: Ui, json: bool) -> Result<()> {
+async fn handle_run_pkg(
+    cmd: PkgCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+    secrets: &SecretBundle,
+) -> Result<()> {
     match cmd {
         PkgCommands::Add { packages, session } => {
-            run_pkg_action(config, ui, session, "add", packages, json).await
+            run_pkg_action(config, ui, session, "add", packages, json, secrets).await
         }
         PkgCommands::Remove { packages, session } => {
-            run_pkg_action(config, ui, session, "remove", packages, json).await
+            run_pkg_action(config, ui, session, "remove", packages, json, secrets).await
         }
         PkgCommands::List { session } => {
-            run_pkg_action(config, ui, session, "list", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "list", Vec::new(), json, secrets).await
         }
         PkgCommands::Status { session } => {
-            run_pkg_action(config, ui, session, "status", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "status", Vec::new(), json, secrets).await
         }
         PkgCommands::Update { packages, session } => {
-            run_pkg_action(config, ui, session, "update", packages, json).await
+            run_pkg_action(config, ui, session, "update", packages, json, secrets).await
         }
         PkgCommands::Restore { file, session } => {
             run_pkg_action(
@@ -2194,11 +2302,12 @@ async fn handle_run_pkg(cmd: PkgCommands, config: &ColabConfig, ui: Ui, json: bo
                 "restore",
                 file.into_iter().collect(),
                 json,
+                secrets,
             )
             .await
         }
         PkgCommands::Check { session } => {
-            run_pkg_action(config, ui, session, "check", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "check", Vec::new(), json, secrets).await
         }
     }
 }
@@ -2208,73 +2317,80 @@ async fn handle_run_julia(
     config: &ColabConfig,
     ui: Ui,
     json: bool,
+    secrets: &SecretBundle,
 ) -> Result<()> {
     let JuliaCommands::Pkg { command } = cmd;
     match command {
         JuliaPkgCommands::Add { packages, session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
-            run_pkg_action(config, ui, session, "add", packages, json).await
+            run_pkg_action(config, ui, session, "add", packages, json, secrets).await
         }
         JuliaPkgCommands::Status { session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
-            run_pkg_action(config, ui, session, "status", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "status", Vec::new(), json, secrets).await
         }
         JuliaPkgCommands::Instantiate { session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
-            run_pkg_action(config, ui, session, "restore", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "restore", Vec::new(), json, secrets).await
         }
         JuliaPkgCommands::Precompile { session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
-            run_pkg_action(config, ui, session, "precompile", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "precompile", Vec::new(), json, secrets).await
         }
         JuliaPkgCommands::Update { session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
-            run_pkg_action(config, ui, session, "update", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "update", Vec::new(), json, secrets).await
         }
         JuliaPkgCommands::Test { session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
-            run_pkg_action(config, ui, session, "test", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "test", Vec::new(), json, secrets).await
         }
         JuliaPkgCommands::Rm { packages, session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
-            run_pkg_action(config, ui, session, "remove", packages, json).await
+            run_pkg_action(config, ui, session, "remove", packages, json, secrets).await
         }
     }
 }
 
-async fn handle_run_r(cmd: RCommands, config: &ColabConfig, ui: Ui, json: bool) -> Result<()> {
+async fn handle_run_r(
+    cmd: RCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+    secrets: &SecretBundle,
+) -> Result<()> {
     match cmd {
         RCommands::Pkg { command } => match command {
             RPkgCommands::Install { packages, session } => {
                 ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
-                run_pkg_action(config, ui, session, "add", packages, json).await
+                run_pkg_action(config, ui, session, "add", packages, json, secrets).await
             }
             RPkgCommands::List { session } => {
                 ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
-                run_pkg_action(config, ui, session, "list", Vec::new(), json).await
+                run_pkg_action(config, ui, session, "list", Vec::new(), json, secrets).await
             }
             RPkgCommands::Update { session } => {
                 ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
-                run_pkg_action(config, ui, session, "update", Vec::new(), json).await
+                run_pkg_action(config, ui, session, "update", Vec::new(), json, secrets).await
             }
             RPkgCommands::Remove { packages, session } => {
                 ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
-                run_pkg_action(config, ui, session, "remove", packages, json).await
+                run_pkg_action(config, ui, session, "remove", packages, json, secrets).await
             }
         },
         RCommands::Renv { command } => match command {
             RenvCommands::Restore { session } => {
                 ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
-                run_pkg_action(config, ui, session, "restore", Vec::new(), json).await
+                run_pkg_action(config, ui, session, "restore", Vec::new(), json, secrets).await
             }
             RenvCommands::Snapshot { session } => {
                 ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
-                run_pkg_action(config, ui, session, "snapshot", Vec::new(), json).await
+                run_pkg_action(config, ui, session, "snapshot", Vec::new(), json, secrets).await
             }
         },
         RCommands::SessionInfo { session } => {
             ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
-            run_pkg_action(config, ui, session, "status", Vec::new(), json).await
+            run_pkg_action(config, ui, session, "status", Vec::new(), json, secrets).await
         }
     }
 }
@@ -2286,6 +2402,7 @@ async fn run_pkg_action(
     action: &str,
     args: Vec<String>,
     json: bool,
+    secrets: &SecretBundle,
 ) -> Result<()> {
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
@@ -2299,12 +2416,13 @@ async fn run_pkg_action(
         )));
     };
     package_progress(&ui, action, &view, &args);
-    let output = runner::execute_colab_cell_in_session(
+    let output = runner::execute_colab_cell_in_session_with_secrets(
         manager.client(),
         &server,
         &kernel_session,
         &code,
         std::time::Duration::from_secs(600),
+        secrets,
     )
     .await?;
     print_repl_output(&output, json)
@@ -2395,7 +2513,12 @@ fn package_progress(ui: &Ui, action: &str, view: &KernelView, args: &[String]) {
     }
 }
 
-async fn handle_exec(cmd: ExecCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+async fn handle_exec(
+    cmd: ExecCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    secrets: &SecretBundle,
+) -> Result<()> {
     match cmd {
         ExecCommands::Run {
             script,
@@ -2404,14 +2527,17 @@ async fn handle_exec(cmd: ExecCommands, config: &ColabConfig, ui: Ui) -> Result<
         } => {
             let mut command = vec!["python".to_string(), script];
             command.extend(args);
-            handle_run(config, ui, session, command).await
+            let command = apply_python_script_bridge(command, secrets)?;
+            handle_run(config, ui, session, command, secrets).await
         }
         ExecCommands::Py { session, code } => {
+            let code = apply_python_code_bridge(code, secrets)?;
             handle_run(
                 config,
                 ui,
                 session,
                 vec!["python".into(), "-c".into(), code],
+                secrets,
             )
             .await
         }
@@ -2433,10 +2559,10 @@ async fn handle_exec(cmd: ExecCommands, config: &ColabConfig, ui: Ui) -> Result<
             if let Some(out) = out {
                 command.extend(["--output".into(), out]);
             }
-            handle_run(config, ui, session, command).await
+            handle_run(config, ui, session, command, secrets).await
         }
-        ExecCommands::Repl { session } => handle_repl(config, ui, session, false).await,
-        ExecCommands::Shell { session } => handle_shell(config, ui, session).await,
+        ExecCommands::Repl { session } => handle_repl(config, ui, session, false, secrets).await,
+        ExecCommands::Shell { session } => handle_shell(config, ui, session, secrets).await,
         ExecCommands::Last { confirm } => {
             if !confirm {
                 return Err(ColabError::config("exec last requires --confirm"));
@@ -2448,11 +2574,36 @@ async fn handle_exec(cmd: ExecCommands, config: &ColabConfig, ui: Ui) -> Result<
     }
 }
 
+fn apply_python_code_bridge(code: String, secrets: &SecretBundle) -> Result<String> {
+    if secrets.is_empty() {
+        return Ok(code);
+    }
+    Ok(format!("{}\n{code}", secrets.python_prelude()))
+}
+
+fn apply_python_script_bridge(command: Vec<String>, secrets: &SecretBundle) -> Result<Vec<String>> {
+    if secrets.is_empty()
+        || command.len() < 2
+        || command.first().map(String::as_str) != Some("python")
+    {
+        return Ok(command);
+    }
+    let script = command[1].clone();
+    let argv_json = serde_json::to_string(&command[1..])?;
+    let script_json = serde_json::to_string(&script)?;
+    let wrapper = format!(
+        "{}\nimport runpy as _cocli_runpy, sys as _cocli_sys\n_cocli_sys.argv = {argv_json}\n_cocli_runpy.run_path({script_json}, run_name='__main__')",
+        secrets.python_prelude()
+    );
+    Ok(vec!["python".into(), "-c".into(), wrapper])
+}
+
 async fn handle_repl(
     config: &ColabConfig,
     ui: Ui,
     session_name: Option<String>,
     json: bool,
+    secrets: &SecretBundle,
 ) -> Result<()> {
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
@@ -2494,8 +2645,15 @@ async fn handle_repl(
         if code.trim().is_empty() {
             return Ok(());
         }
-        let output =
-            execute_repl_code(manager.client(), &server, session, &kernel_id, &code).await?;
+        let output = execute_repl_code(
+            manager.client(),
+            &server,
+            session,
+            &kernel_id,
+            &code,
+            secrets,
+        )
+        .await?;
         return print_repl_output(&output, json);
     }
 
@@ -2514,9 +2672,15 @@ async fn handle_repl(
                 if repl_quit_command(&code) {
                     break;
                 }
-                let output =
-                    execute_repl_code(manager.client(), &server, session, &kernel_id, &code)
-                        .await?;
+                let output = execute_repl_code(
+                    manager.client(),
+                    &server,
+                    session,
+                    &kernel_id,
+                    &code,
+                    secrets,
+                )
+                .await?;
                 print_repl_output(&output, false)?;
             }
             ReplInput::Interrupt => {
@@ -2565,13 +2729,15 @@ async fn execute_repl_code(
     session: &Session,
     kernel_id: &str,
     code: &str,
+    secrets: &SecretBundle,
 ) -> Result<runner::CellOutput> {
-    let execute = runner::execute_colab_cell_in_session(
+    let execute = runner::execute_colab_cell_in_session_with_secrets(
         client,
         server,
         session,
         code,
         std::time::Duration::from_secs(30),
+        secrets,
     );
     tokio::pin!(execute);
     tokio::select! {
@@ -3701,7 +3867,12 @@ fn shell_single_quote(s: &str) -> String {
     out
 }
 
-async fn handle_env(cmd: EnvCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+async fn handle_env(
+    cmd: EnvCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    secrets: &SecretBundle,
+) -> Result<()> {
     match cmd {
         EnvCommands::Install { packages, session } => {
             if packages.is_empty() {
@@ -3714,6 +3885,7 @@ async fn handle_env(cmd: EnvCommands, config: &ColabConfig, ui: Ui) -> Result<()
                 ui,
                 session,
                 crate::cocli::runtime::pip_install_command(&packages),
+                secrets,
             )
             .await
         }
@@ -3723,6 +3895,7 @@ async fn handle_env(cmd: EnvCommands, config: &ColabConfig, ui: Ui) -> Result<()
                 ui,
                 session,
                 vec!["python".into(), "-m".into(), "pip".into(), "freeze".into()],
+                secrets,
             )
             .await
         }
@@ -3742,6 +3915,7 @@ async fn handle_env(cmd: EnvCommands, config: &ColabConfig, ui: Ui) -> Result<()
                     "-r".into(),
                     requirements,
                 ],
+                secrets,
             )
             .await
         }
@@ -4595,7 +4769,7 @@ impl SettingsEditorState {
         match self.page {
             SettingsPage::Main => self.main_pages().len(),
             SettingsPage::Ui => 10,
-            SettingsPage::Experiments => 7,
+            SettingsPage::Experiments => 8,
             _ => 1,
         }
     }
@@ -4707,7 +4881,8 @@ impl SettingsEditorState {
             3 => self.cfg.experiments.mcp_server = !self.cfg.experiments.mcp_server,
             4 => self.cfg.experiments.ai_plan_runner = !self.cfg.experiments.ai_plan_runner,
             5 => self.cfg.experiments.ast_observer = !self.cfg.experiments.ast_observer,
-            6 => {
+            6 => self.cfg.experiments.secrets_bridge = !self.cfg.experiments.secrets_bridge,
+            7 => {
                 self.cfg.experiments.background_live_checks =
                     !self.cfg.experiments.background_live_checks;
             }
@@ -5101,7 +5276,7 @@ struct ExperimentItem {
     enabled: bool,
 }
 
-fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 7] {
+fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 8] {
     [
         ExperimentItem {
             label: "Continue",
@@ -5132,6 +5307,11 @@ fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 7] {
             label: "AST observer",
             risk: "local read-only code outline",
             enabled: cfg.experiments.ast_observer,
+        },
+        ExperimentItem {
+            label: "Secrets bridge",
+            risk: "pass local secrets into CLI-run code",
+            enabled: cfg.experiments.secrets_bridge,
         },
         ExperimentItem {
             label: "Background live checks",
@@ -5177,6 +5357,7 @@ fn handle_experiment_set(key: &str, value: String, json: bool) -> Result<()> {
         "mcp_server" => cfg.experiments.mcp_server = enabled,
         "ai_plan_runner" => cfg.experiments.ai_plan_runner = enabled,
         "ast_observer" => cfg.experiments.ast_observer = enabled,
+        "secrets_bridge" => cfg.experiments.secrets_bridge = enabled,
         "background_live_checks" => cfg.experiments.background_live_checks = enabled,
         "fleet" => {
             cfg.experiments.distribute = enabled;
@@ -5726,6 +5907,30 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             &["colab settings skills inspect agent.audit"],
             &["Destructive actions require confirmation"],
         ),
+        skill(
+            "secret.inject",
+            "secrets",
+            "med",
+            false,
+            false,
+            "Request named secrets for a run",
+            &["keys"],
+            &["redacted_request"],
+            &["colab run script train.py --env HF_TOKEN --json"],
+            &["Values are never exposed through the tool catalog"],
+        ),
+        skill(
+            "run.with_env",
+            "secrets",
+            "med",
+            true,
+            true,
+            "Run code with explicit local secret env",
+            &["command", "keys"],
+            &["execution"],
+            &["colab run py --env HF_TOKEN --code '...'"],
+            &["No hidden environment forwarding"],
+        ),
     ];
     rows.extend([
         skill(
@@ -5827,6 +6032,8 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             cfg.experiments.ast_observer
         } else if row.name.starts_with("mcp.") {
             cfg.experiments.mcp_server
+        } else if row.name.starts_with("secret.") || row.name == "run.with_env" {
+            cfg.experiments.secrets_bridge
         } else {
             true
         }
@@ -6578,6 +6785,114 @@ fn handle_ai(cmd: Option<AiCommands>, ui: Ui, json: bool) -> Result<()> {
     }
 }
 
+fn handle_secret(cmd: SecretCommands, ui: Ui, json: bool) -> Result<()> {
+    require_experiment("secrets bridge", |cfg| cfg.experiments.secrets_bridge)?;
+    match cmd {
+        SecretCommands::List => {
+            if json {
+                print_value(true, &serde_json::json!({ "secrets": [] }))
+            } else {
+                println!("{}", heading("Secrets", ui));
+                println!("No persistent secret store is configured.");
+                println!("fix: pass secrets with --env KEY, --env-file PATH, or --secret KEY");
+                Ok(())
+            }
+        }
+        SecretCommands::Set {
+            key,
+            from_env,
+            prompt,
+            value,
+        } => {
+            secrets::validate_key(&key)?;
+            if value.is_some() && !ui.quiet {
+                eprintln!(
+                    "warning: passing secrets as CLI arguments can leak through shell history; prefer --from-env or --prompt"
+                );
+            }
+            if let Some(local) = from_env.as_deref() {
+                secrets::validate_key(local)?;
+                if std::env::var_os(local).is_none() {
+                    return Err(ColabError::config(format!(
+                        "Missing secret: {local}\nfix: export {local}=..."
+                    )));
+                }
+            }
+            if prompt || from_env.is_some() || value.is_some() {
+                if json {
+                    print_value(
+                        true,
+                        &serde_json::json!({
+                            "ok": true,
+                            "stored": false,
+                            "key": key,
+                            "value": "<redacted>",
+                            "message": "plaintext config storage is disabled; use --env or --env-file for run commands"
+                        }),
+                    )
+                } else {
+                    println!("secret validated: {key}");
+                    println!("stored: no");
+                    println!("fix: run with --env {key} or --secret {key}");
+                    Ok(())
+                }
+            } else {
+                Err(ColabError::config(
+                    "secret set needs --from-env LOCAL_ENV, --prompt, or explicit --value",
+                ))
+            }
+        }
+        SecretCommands::Unset { key } => {
+            secrets::validate_key(&key)?;
+            if json {
+                print_value(
+                    true,
+                    &serde_json::json!({ "ok": true, "removed": false, "key": key }),
+                )
+            } else {
+                println!("secret not stored locally: {key}");
+                Ok(())
+            }
+        }
+        SecretCommands::Inject { keys } => {
+            for key in &keys {
+                secrets::validate_key(key)?;
+            }
+            print_value(
+                json,
+                &serde_json::json!({
+                    "ok": true,
+                    "keys": keys,
+                    "values": "<redacted>",
+                    "run_flag": "--env KEY"
+                }),
+            )
+        }
+        SecretCommands::Status | SecretCommands::Doctor => {
+            let cfg = load_cocli_config()?;
+            print_value_or_kv(
+                json,
+                "secrets",
+                &serde_json::json!({
+                    "experiment": cfg.experiments.secrets_bridge,
+                    "provider": cfg.secrets.provider,
+                    "plaintext_config": false,
+                    "env": cfg.secrets.allow_env,
+                    "env_file": cfg.secrets.allow_env_file,
+                }),
+            )
+        }
+        SecretCommands::ExportRedacted => print_value(
+            json,
+            &serde_json::json!({
+                "secrets": [],
+                "values": "<redacted>",
+                "plaintext_config": false
+            }),
+        ),
+    }
+}
+
 fn handle_ai_tools(cmd: Option<AiToolsCommands>, ui: Ui, json: bool) -> Result<()> {
     match cmd.unwrap_or(AiToolsCommands::List { json: false }) {
         AiToolsCommands::List { json: local_json } => {
@@ -6772,11 +7087,13 @@ async fn handle_continue(
             }
 
             for step in &steps {
+                let no_secrets = SecretBundle::default();
                 handle_run(
                     config,
                     ui,
                     Some(manifest.session.name.clone()),
                     step.command.clone(),
+                    &no_secrets,
                 )
                 .await?;
             }
@@ -6848,10 +7165,17 @@ fn handle_config(cmd: ConfigCommands, json: bool) -> Result<()> {
                 "support.redact_paths" => cfg.support.redact_paths = parse_bool(&value)?,
                 "support.redact_emails" => cfg.support.redact_emails = parse_bool(&value)?,
                 "support.redact_tokens" => cfg.support.redact_tokens = parse_bool(&value)?,
+                "secrets.provider" => cfg.secrets.provider = value,
+                "secrets.allow_env" => cfg.secrets.allow_env = parse_bool(&value)?,
+                "secrets.allow_env_file" => cfg.secrets.allow_env_file = parse_bool(&value)?,
+                "secrets.redact_names" => cfg.secrets.redact_names = parse_bool(&value)?,
+                "secrets.inject_into_notebooks" => {
+                    cfg.secrets.inject_into_notebooks = parse_bool(&value)?
+                }
                 "dev.enabled" => cfg.dev.enabled = parse_bool(&value)?,
                 _ => {
                     return Err(ColabError::config(
-                        "supported settings keys include ui.theme, ui.color, ui.animations, ui.tui, ui.bell, ui.fun, ui.icons, output.json, skills.enabled, support.redact_tokens, experiments.distribute, experiments.continue, experiments.mcp_server, experiments.ai_plan_runner, experiments.ast_observer, and dev.enabled",
+                        "supported settings keys include ui.theme, ui.color, ui.animations, ui.tui, ui.bell, ui.fun, ui.icons, output.json, skills.enabled, support.redact_tokens, secrets.allow_env, experiments.distribute, experiments.continue, experiments.secrets_bridge, and dev.enabled",
                     ));
                 }
             }
@@ -7395,10 +7719,16 @@ async fn handle_server(cmd: ServerCommands, config: &ColabConfig, ui: Ui) -> Res
             }
         }
         ServerCommands::Rm { name } => handle_rm(config, ui, name).await,
-        ServerCommands::Shell { name } => handle_shell(config, ui, name).await,
+        ServerCommands::Shell { name } => {
+            let no_secrets = SecretBundle::default();
+            handle_shell(config, ui, name, &no_secrets).await
+        }
         ServerCommands::Info { name } => handle_info(config, ui, name).await,
         ServerCommands::Ps { name, interval } => handle_ps(config, ui, name, interval).await,
-        ServerCommands::Run { name, command } => handle_run(config, ui, name, command).await,
+        ServerCommands::Run { name, command } => {
+            let no_secrets = SecretBundle::default();
+            handle_run(config, ui, name, command, &no_secrets).await
+        }
     }
 }
 
@@ -7408,6 +7738,7 @@ async fn handle_run(
     ui: Ui,
     name: Option<String>,
     command: Vec<String>,
+    secrets: &SecretBundle,
 ) -> Result<()> {
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
@@ -7415,7 +7746,8 @@ async fn handle_run(
     let server = ensure_fresh_token(&manager, server, &ui).await?;
     let client = manager.client();
 
-    let exit_code = runner::run_passthrough(client, &server, &command).await?;
+    let exit_code =
+        runner::run_passthrough_with_secrets(client, &server, &command, secrets).await?;
     if exit_code != 0 {
         std::process::exit(exit_code);
     }
@@ -7892,7 +8224,12 @@ async fn handle_rm(config: &ColabConfig, ui: Ui, name: Option<String>) -> Result
     }
 }
 
-async fn handle_shell(config: &ColabConfig, ui: Ui, name: Option<String>) -> Result<()> {
+async fn handle_shell(
+    config: &ColabConfig,
+    ui: Ui,
+    name: Option<String>,
+    secrets: &SecretBundle,
+) -> Result<()> {
     let manager = make_manager(config)?;
     let servers = manager.list_local()?;
 
@@ -7941,7 +8278,7 @@ async fn handle_shell(config: &ColabConfig, ui: Ui, name: Option<String>) -> Res
         })
     };
 
-    runner::run_shell(client, &server, None, Some(refresher)).await
+    runner::run_shell_with_secrets(client, &server, None, Some(refresher), secrets).await
 }
 
 async fn handle_info(config: &ColabConfig, ui: Ui, name: Option<String>) -> Result<()> {

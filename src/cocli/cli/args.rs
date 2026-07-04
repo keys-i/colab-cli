@@ -28,6 +28,15 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub bell: bool,
 
+    #[arg(long = "env", global = true, hide = true, action = clap::ArgAction::Append)]
+    pub secret_env: Vec<String>,
+
+    #[arg(long = "env-file", global = true, hide = true, action = clap::ArgAction::Append)]
+    pub secret_env_file: Vec<String>,
+
+    #[arg(long = "secret", global = true, hide = true, action = clap::ArgAction::Append)]
+    pub secret: Vec<String>,
+
     #[arg(long, global = true, hide = true)]
     pub no_interactive: bool,
 
@@ -111,6 +120,12 @@ pub enum Commands {
     Ai {
         #[command(subcommand)]
         command: Option<AiCommands>,
+    },
+    /// Experimental secrets bridge
+    #[command(display_order = 77, hide = true)]
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommands,
     },
     /// Sign in and inspect credentials
     #[command(display_order = 80)]
@@ -243,6 +258,29 @@ pub struct CompatTransferArgs {
     pub session: Option<String>,
     pub src: String,
     pub dest: String,
+}
+
+#[derive(Subcommand)]
+pub enum SecretCommands {
+    List,
+    Set {
+        key: String,
+        #[arg(long = "from-env")]
+        from_env: Option<String>,
+        #[arg(long)]
+        prompt: bool,
+        #[arg(long)]
+        value: Option<String>,
+    },
+    Unset {
+        key: String,
+    },
+    Inject {
+        keys: Vec<String>,
+    },
+    Status,
+    Doctor,
+    ExportRedacted,
 }
 
 #[derive(clap::Args)]

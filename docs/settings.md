@@ -30,6 +30,7 @@ colab settings set ui.theme auto
 colab settings ui set color always
 colab settings ui set animations false
 colab settings experiments set distribute true
+colab settings experiments set secrets-bridge true
 ```
 
 Preview terminal colour roles:
@@ -76,8 +77,16 @@ fleet = false
 mcp_server = false
 ai_plan_runner = false
 ast_observer = false
+secrets_bridge = false
 slurp_automation = false
 background_live_checks = false
+
+[secrets]
+provider = "keyring-or-session"
+allow_env = true
+allow_env_file = true
+redact_names = false
+inject_into_notebooks = false
 
 [support]
 redact_paths = true
@@ -123,6 +132,7 @@ colab settings experiments get distribute
 colab settings experiments set continue true
 colab settings experiments set distribute true
 colab settings experiments set ast-observer true
+colab settings experiments set secrets-bridge true
 colab settings experiments reset
 ```
 
@@ -143,6 +153,7 @@ Experiment gates:
 | MCP server | off | `ai mcp` | Server is still a disabled placeholder unless implemented. |
 | AI plan runner | off | `ai plan`, `ai run` | `ai run` also requires `--confirm`. |
 | AST observer | off | `run ast`, `run --ast`, `ai code` | Local read-only parser before execution. |
+| Secrets bridge | off | `secret`, `run --env`, `run --secret`, `run --env-file` | Pass explicit local secrets into CLI-run code; no plaintext config storage. |
 | Background live checks | off | future live status checks | May touch network. |
 
 Private maintainer helpers are hidden under `settings dev` and documented only in [maintainer.md](maintainer.md).

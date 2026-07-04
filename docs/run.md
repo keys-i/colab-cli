@@ -44,6 +44,23 @@ colab run pip check --session trainer
 colab run pip list --session trainer
 ```
 
+Secrets bridge is experimental and off by default:
+
+```sh
+colab settings experiments set secrets-bridge true
+colab run script train.py --env HF_TOKEN --session trainer
+colab run py --env HF_TOKEN --code "from google.colab import userdata; print(len(userdata.get('HF_TOKEN')))"
+```
+
+`--env KEY` reads local environment variable `KEY` and exposes it to the remote
+run as `os.environ["KEY"]`. For Python runs, cocli also bridges
+`google.colab.userdata.get("KEY")` for keys supplied to that run.
+
+`--env REMOTE:LOCAL` maps a local env var to a different remote name.
+`--env-file PATH` reads a dotenv-style file. `--env KEY=VALUE` is accepted for
+automation but can leak through shell history; prefer `--env KEY` or
+`--secret KEY`.
+
 For Julia and R kernels:
 
 ```sh

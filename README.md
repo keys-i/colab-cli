@@ -32,6 +32,14 @@ colab settings experiments set distribute true
 colab settings experiments set continue true
 ```
 
+Optional experiments:
+
+| Experiment | Default | Use |
+|---|---|---|
+| Continue | Off | Checkpoint and replay continuation metadata |
+| Distribute | Off | Recipes, pools, and sharded runtime work |
+| Secrets bridge | Off | Pass local secrets into CLI-run Colab code and bridge `userdata.get()` |
+
 `continue` is checkpoint/replay metadata. It does not move live Python process memory between runtimes.
 
 ## Default Help
@@ -85,6 +93,7 @@ colab --json -v status
 
 Debug lines go to stderr and are redacted. See [Debugging](docs/debugging.md).
 Kernel selection and language-aware packages are covered in [Kernel](docs/kernel.md).
+Secrets bridge is covered in [Secrets Bridge](docs/features/secrets.md).
 
 ## Command Space
 
@@ -112,6 +121,7 @@ colab run pip install torch transformers --session trainer
 colab run pip install -r requirements.txt --session trainer
 colab run pip freeze --session trainer
 colab run pip restore requirements.txt --session trainer
+colab run script train.py --env HF_TOKEN --session trainer
 
 colab fs ls /content
 colab fs upload ./data.csv /content/data.csv

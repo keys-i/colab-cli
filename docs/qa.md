@@ -19,6 +19,9 @@
 - `ai tools list` renders the same agent-facing catalog without debug booleans.
 - `run ast`, `ai mcp`, `ai plan`, and `ai run` fail with `experimental feature disabled` until enabled.
 - `distribute` and `continue` fail with `experimental feature disabled` until enabled.
+- `secret` stays hidden from default help and fails with `experimental feature disabled` until Secrets bridge is enabled.
+- `run ... --env KEY` is gated by Secrets bridge and never prints secret values in normal, verbose, JSON, log, or support output covered by tests.
+- `ai tools list` shows `secret.inject` and `run.with_env` only when Secrets bridge is enabled.
 - `run pip install`, `run pip freeze`, and `run pip restore` parse.
 - `session kernel list/current/select/specs/start/interrupt/restart/shutdown/refresh` parse.
 - `status kernel --all` and `status kernel --refresh` parse.

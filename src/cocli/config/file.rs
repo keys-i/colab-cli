@@ -139,6 +139,32 @@ impl Default for SupportConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecretsConfig {
+    #[serde(default = "default_secret_provider")]
+    pub provider: String,
+    #[serde(default = "default_true")]
+    pub allow_env: bool,
+    #[serde(default = "default_true")]
+    pub allow_env_file: bool,
+    #[serde(default)]
+    pub redact_names: bool,
+    #[serde(default)]
+    pub inject_into_notebooks: bool,
+}
+
+impl Default for SecretsConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_secret_provider(),
+            allow_env: true,
+            allow_env_file: true,
+            redact_names: false,
+            inject_into_notebooks: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct DevConfig {
     #[serde(default)]
@@ -162,6 +188,8 @@ pub struct ExperimentsConfig {
     #[serde(default)]
     pub ast_observer: bool,
     #[serde(default)]
+    pub secrets_bridge: bool,
+    #[serde(default)]
     pub slurp_automation: bool,
     #[serde(default)]
     pub background_live_checks: bool,
@@ -179,6 +207,8 @@ pub struct CocliConfig {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub support: SupportConfig,
+    #[serde(default)]
+    pub secrets: SecretsConfig,
     #[serde(default)]
     pub experiments: ExperimentsConfig,
     #[serde(default)]
@@ -213,6 +243,10 @@ fn default_theme() -> String {
 
 fn default_tui() -> String {
     "auto".to_string()
+}
+
+fn default_secret_provider() -> String {
+    "keyring-or-session".to_string()
 }
 
 pub fn terminal_bell_allowed(enabled: bool, ci: bool, quiet: bool) -> bool {

@@ -9,11 +9,47 @@ fn parses_major_command_spaces() {
         ["colab", "session", "last"].as_slice(),
         ["colab", "run", "last", "--confirm"].as_slice(),
         ["colab", "run", "py", "--code", "print(1)"].as_slice(),
+        [
+            "colab", "run", "py", "--env", "HF_TOKEN", "--code", "print(1)",
+        ]
+        .as_slice(),
         ["colab", "run", "code", "--code", "1 + 1"].as_slice(),
         ["colab", "run", "notebook", "report.ipynb"].as_slice(),
+        [
+            "colab",
+            "run",
+            "notebook",
+            "report.ipynb",
+            "--env",
+            "HF_TOKEN",
+        ]
+        .as_slice(),
         ["colab", "run", "repl"].as_slice(),
+        ["colab", "run", "repl", "--env", "HF_TOKEN"].as_slice(),
         ["colab", "run", "shell"].as_slice(),
+        ["colab", "run", "shell", "--env", "HF_TOKEN"].as_slice(),
+        ["colab", "run", "shell", "--secret", "HF_TOKEN"].as_slice(),
+        [
+            "colab",
+            "run",
+            "py",
+            "--env-file",
+            ".env",
+            "--code",
+            "print(1)",
+        ]
+        .as_slice(),
         ["colab", "run", "pkg", "add", "numpy"].as_slice(),
+        [
+            "colab",
+            "run",
+            "pkg",
+            "add",
+            "transformers",
+            "--env",
+            "HF_TOKEN",
+        ]
+        .as_slice(),
         ["colab", "run", "pkg", "remove", "numpy"].as_slice(),
         ["colab", "run", "pkg", "list"].as_slice(),
         ["colab", "run", "pkg", "status"].as_slice(),
@@ -41,7 +77,24 @@ fn parses_major_command_spaces() {
         ["colab", "run", "r", "session-info"].as_slice(),
         ["colab", "run", "ast", "file.py"].as_slice(),
         ["colab", "run", "watch", "file.py", "--ast"].as_slice(),
+        ["colab", "run", "script", "train.py", "--env", "HF_TOKEN"].as_slice(),
         ["colab", "run", "install", "torch"].as_slice(),
+        ["colab", "secret", "list"].as_slice(),
+        ["colab", "secret", "set", "HF_TOKEN", "--prompt"].as_slice(),
+        [
+            "colab",
+            "secret",
+            "set",
+            "HF_TOKEN",
+            "--from-env",
+            "LOCAL_HF_TOKEN",
+        ]
+        .as_slice(),
+        ["colab", "secret", "unset", "HF_TOKEN"].as_slice(),
+        ["colab", "secret", "inject", "HF_TOKEN"].as_slice(),
+        ["colab", "secret", "status"].as_slice(),
+        ["colab", "secret", "doctor"].as_slice(),
+        ["colab", "secret", "export-redacted"].as_slice(),
         ["colab", "fs", "changed", ".", "/content"].as_slice(),
         ["colab", "fs", "upload", "local.txt", "/content/local.txt"].as_slice(),
         ["colab", "fs", "download", "/content/out", "./out"].as_slice(),
@@ -207,6 +260,7 @@ fn top_level_help_has_final_command_spaces() {
         "doctor",
         "release",
         "agent",
+        "secret",
     ] {
         assert!(!stdout.contains(&format!("  {old}")), "{old}");
     }
@@ -401,6 +455,8 @@ fn docs_exist() {
         "docs/logs.md",
         "docs/run.md",
         "docs/kernel.md",
+        "docs/features/secrets.md",
+        "docs/issues/userdata-cli-secrets.md",
         "docs/audit/public-vs-experimental.md",
         "docs/audit/yagni-prune.md",
         "plan.md",
@@ -509,6 +565,7 @@ fn settings_experiments_default_off_and_persist() {
     assert!(stdout.contains("[ ] MCP server"));
     assert!(stdout.contains("[ ] AI plan runner"));
     assert!(stdout.contains("[ ] AST observer"));
+    assert!(stdout.contains("[ ] Secrets bridge"));
     assert!(!stdout.contains("Quick Actions"));
 
     let set = bin()
@@ -624,12 +681,65 @@ fn optional_commands_are_experiment_gated() {
         ["distribute", "plan"].as_slice(),
         ["continue", "last"].as_slice(),
         ["run", "ast", "Cargo.toml"].as_slice(),
+        ["secret", "list"].as_slice(),
     ] {
         let out = bin().env("HOME", home.path()).args(args).output().unwrap();
         assert!(!out.status.success(), "{args:?}");
         let stderr = String::from_utf8(out.stderr).unwrap();
         assert!(stderr.contains("experimental feature disabled"), "{stderr}");
     }
+}
+
+#[test]
+fn secrets_bridge_flags_are_gated_and_redacted() {
+    let home = tempfile::tempdir().unwrap();
+    let blocked = bin()
+        .env("HOME", home.path())
+        .env("COCLI_TEST_SECRET", "secret-value")
+        .args([
+            "run",
+            "py",
+            "--env",
+            "COCLI_TEST_SECRET",
+            "--code",
+            "print(1)",
+        ])
+        .output()
+        .unwrap();
+    assert!(!blocked.status.success());
+    let stderr = String::from_utf8(blocked.stderr).unwrap();
+    assert!(stderr.contains("experimental feature disabled: secrets bridge"));
+    assert!(!stderr.contains("secret-value"));
+
+    let set = bin()
+        .env("HOME", home.path())
+        .args(["settings", "experiments", "set", "secrets-bridge", "true"])
+        .output()
+        .unwrap();
+    assert!(set.status.success());
+
+    let direct = bin()
+        .env("HOME", home.path())
+        .args(["secret", "set", "HF_TOKEN", "--value", "hf_secret"])
+        .output()
+        .unwrap();
+    assert!(direct.status.success());
+    let stdout = String::from_utf8(direct.stdout).unwrap();
+    let stderr = String::from_utf8(direct.stderr).unwrap();
+    assert!(!stdout.contains("hf_secret"));
+    assert!(!stderr.contains("hf_secret"));
+    assert!(stderr.contains("shell history"));
+
+    let tools = bin()
+        .env("HOME", home.path())
+        .args(["ai", "tools", "list"])
+        .output()
+        .unwrap();
+    assert!(tools.status.success());
+    let stdout = String::from_utf8(tools.stdout).unwrap();
+    assert!(stdout.contains("secret.inject"));
+    assert!(stdout.contains("run.with_env"));
+    assert!(!stdout.contains("secret-value"));
 }
 
 #[test]

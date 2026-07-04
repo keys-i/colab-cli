@@ -33,7 +33,9 @@ It should make normal Colab work less annoying:
 - [x] `run shell` uses Colab `/colab/tty` where supported instead of assuming Jupyter terminals
 - [x] settings interactive editing supports back/save/multiple edits
 - [x] release helpers live under private `settings dev release`
+- [x] Secrets bridge is experimental/off by default and injects explicit local secrets into CLI-run code
 - [ ] run live Drive/session smoke with a real Colab kernel
+- [ ] run live secrets smoke with a real Colab kernel before calling it stable
 - [ ] replace the simple AST parser with Tree-sitter if exact nodes become necessary
 - [ ] implement MCP stdio only when protocol tests exist
 - [ ] run competitor benchmarks before making performance claims
@@ -45,6 +47,7 @@ It should make normal Colab work less annoying:
 3. Keep distribute compliant and dry-run first.
 4. Keep continuation honest as checkpoint/replay.
 5. Benchmark before bragging.
+6. Keep secret values explicit, per-run, and redacted.
 
 ## Non-Goals
 
@@ -71,5 +74,6 @@ It should make normal Colab work less annoying:
 - finish richer `fs sync` remote/cache comparison
 - add exact AST parsing if the current outline is too rough
 - implement MCP stdio only with protocol tests
+- run live secrets smoke with `COLAB_CLI_SECRET_TEST=1`
 - run first real competitor benchmark pass
 - update claims ledger with measured numbers only

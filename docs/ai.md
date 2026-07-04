@@ -20,6 +20,10 @@ surfaces such as `runtime.inspect`, `fs.diff`, `fs.changed`, `kernel.list`,
 Recipe/distribute, continue, AST, and MCP rows appear only after their
 experiments are enabled.
 
+Secrets rows such as `secret.inject` and `run.with_env` appear only after
+`settings experiments set secrets-bridge true`. They expose secret names and
+redacted requests, never values.
+
 Package tool rows adapt to cached kernel metadata. Python shows `pkg.python`,
 Julia shows `pkg.julia`, and R shows `pkg.r`. The catalog does not list pip as
 an agent tool for Julia or R kernels.

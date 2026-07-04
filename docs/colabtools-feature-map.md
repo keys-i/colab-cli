@@ -13,7 +13,7 @@ Reference checked: `googlecolab/colabtools` local checkout under `colabtools/`. 
 | output/log capture | `colab run ...`, `logs/export` where available | implemented/deferred by command | Run output streams normally; richer log export is kept as explicit support work. |
 | runtime/backend info | `colab status runtime --backend`, `--versions`, `--gpu`, `--tpu` | implemented | Uses public runtime/session surfaces. Backend package snapshots are reference data only. |
 | notebook execution | `colab run notebook` | implemented | Runs notebooks through the selected runtime path. |
-| user data/secrets | `settings support bug-report`, redaction, future secrets check | partial | CLI must not print secret values. Only redacted checks are appropriate. |
+| `google.colab.userdata.get` | `colab run ... --env KEY`, hidden `colab secret ...` | experimental bridge | Colab web UI Secrets are frontend-backed; cocli bridges only explicit local secrets for CLI-run code. |
 | forms/widgets | none | not applicable outside notebook UI | Terminal widgets would be fake unless backed by a real CLI workflow. |
 | JavaScript/browser helpers | none | not applicable outside notebook UI | Browser-only APIs stay in notebooks. |
 | data tables/quick charts/autoviz | `ai code deps`, future explain-only helpers | deferred | Useful terminal equivalent would be static inspection, not browser rendering. |
@@ -29,6 +29,7 @@ Implemented missing useful equivalents in this pass:
 - Drive mount/status progress and friendly errors
 - `run pip ...` package surface
 - local AST/code observer under `run`
+- experimental local secrets bridge for `userdata.get`
 - `distribute` recipe/pool/shard surface, gated
 - redacted settings/support surfaces
 

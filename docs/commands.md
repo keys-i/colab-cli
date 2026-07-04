@@ -10,6 +10,9 @@ Default public spaces: `session`, `run`, `fs`, `status`, `auth`, `log`, `setting
 
 Experimental spaces are hidden until explicitly enabled: `continue`, `distribute`.
 
+`secret` is also hidden until the Secrets bridge experiment is enabled. Normal
+usage is through run flags such as `--env KEY`, not a public top-level command.
+
 Hidden aliases exist for one migration cycle where they are cheap. They do not appear in normal help.
 
 ## Session
@@ -51,6 +54,7 @@ colab run pip freeze --session trainer
 colab run pip restore requirements.txt --session trainer
 colab run pip check --session trainer
 colab run pip list --session trainer
+colab run script train.py --env HF_TOKEN --session trainer
 ```
 
 `run script` executes the path on the remote runtime. Upload local files first with `fs upload`.
@@ -63,6 +67,16 @@ Jupyter `/api/terminals` by default.
 
 `run pkg` follows the active kernel. `run pip` is Python-specific and is not
 shown as primary help when cached metadata says the active kernel is Julia or R.
+
+Secrets bridge is experimental:
+
+```sh
+colab settings experiments set secrets-bridge true
+colab run script train.py --env HF_TOKEN --session trainer
+```
+
+It bridges `google.colab.userdata.get("HF_TOKEN")` only for explicitly supplied
+local secrets. See [features/secrets.md](features/secrets.md).
 
 ## Fs
 

@@ -9,6 +9,7 @@ use tokio_tungstenite::tungstenite;
 
 use crate::cocli::error::{ColabError, Result};
 use crate::cocli::kernel::KernelInfoSummary;
+use crate::cocli::secrets::SecretBundle;
 use crate::cocli::session::client::ColabClient;
 use crate::cocli::session::model::Session;
 use crate::cocli::session::store::StoredServer;
@@ -74,6 +75,25 @@ pub async fn execute_colab_cell_in_session(
     code: &str,
     timeout: std::time::Duration,
 ) -> Result<CellOutput> {
+    execute_colab_cell_in_session_with_secrets(
+        _client,
+        server,
+        session,
+        code,
+        timeout,
+        &SecretBundle::default(),
+    )
+    .await
+}
+
+pub async fn execute_colab_cell_in_session_with_secrets(
+    _client: &ColabClient,
+    server: &StoredServer,
+    session: &Session,
+    code: &str,
+    timeout: std::time::Duration,
+    secrets: &SecretBundle,
+) -> Result<CellOutput> {
     let kernel_id = session
         .kernel
         .as_ref()
@@ -95,6 +115,12 @@ pub async fn execute_colab_cell_in_session(
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
     let msg_id = uuid::Uuid::new_v4().to_string();
+    let code = if secrets.is_empty() {
+        code.to_string()
+    } else {
+        format!("{}\n{code}", secrets.python_prelude())
+    };
+
     let execute = serde_json::json!({
         "header": {
             "msg_id": msg_id,
@@ -133,10 +159,14 @@ pub async fn execute_colab_cell_in_session(
         let msg = tokio::time::timeout(remaining, ws_read.next()).await;
         let text = match msg {
             Ok(Some(Ok(tungstenite::Message::Text(text)))) => text,
-            Ok(Some(Ok(tungstenite::Message::Close(_)))) | Ok(None) => return Ok(out),
+            Ok(Some(Ok(tungstenite::Message::Close(_)))) | Ok(None) => {
+                redact_cell_output(&mut out, secrets);
+                return Ok(out);
+            }
             Ok(Some(Err(e))) => return Err(ColabError::oauth(format!("Kernel WebSocket: {e}"))),
             Err(_) => {
                 out.timed_out = true;
+                redact_cell_output(&mut out, secrets);
                 return Ok(out);
             }
             _ => continue,
@@ -152,6 +182,9 @@ pub async fn execute_colab_cell_in_session(
         {
             continue;
         }
+        if handle_colab_secret_request(&value, &mut ws_write, &session.id, secrets).await? {
+            continue;
+        }
         collect_cell_message(&value, &mut out);
         if value.pointer("/header/msg_type").and_then(|v| v.as_str()) == Some("status")
             && value
@@ -159,9 +192,68 @@ pub async fn execute_colab_cell_in_session(
                 .and_then(|v| v.as_str())
                 == Some("idle")
         {
+            redact_cell_output(&mut out, secrets);
             return Ok(out);
         }
     }
+}
+
+async fn handle_colab_secret_request<S>(
+    value: &serde_json::Value,
+    ws_write: &mut S,
+    session_id: &str,
+    secrets: &SecretBundle,
+) -> Result<bool>
+where
+    S: futures_util::Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin,
+{
+    if value.pointer("/header/msg_type").and_then(|v| v.as_str()) != Some("colab_request")
+        || value
+            .pointer("/metadata/colab_request_type")
+            .and_then(|v| v.as_str())
+            != Some("GetSecret")
+    {
+        return Ok(false);
+    }
+    let Some(colab_msg_id) = value.pointer("/metadata/colab_msg_id").cloned() else {
+        return Ok(true);
+    };
+    let key = value
+        .pointer("/content/request/key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let reply_value = if secrets.is_empty() {
+        serde_json::json!({
+            "type": "colab_reply",
+            "colab_msg_id": colab_msg_id,
+            "error": "CLI secrets bridge has no value for this key; run with --env KEY or enable Secrets bridge in settings",
+        })
+    } else {
+        serde_json::json!({
+            "type": "colab_reply",
+            "colab_msg_id": colab_msg_id,
+            "data": crate::cocli::secrets::userdata_reply(key, secrets)?,
+        })
+    };
+    let reply = serde_json::json!({
+        "header": {
+            "msg_id": uuid::Uuid::new_v4().to_string(),
+            "username": "colab-cli",
+            "session": session_id,
+            "date": chrono::Utc::now().to_rfc3339(),
+            "msg_type": "input_reply",
+            "version": "5.3"
+        },
+        "parent_header": value.get("header").cloned().unwrap_or_default(),
+        "metadata": {},
+        "content": { "value": reply_value },
+        "channel": "stdin"
+    });
+    ws_write
+        .send(tungstenite::Message::Text(reply.to_string().into()))
+        .await
+        .map_err(|e| ColabError::oauth(format!("Kernel WebSocket send: {e}")))?;
+    Ok(true)
 }
 
 pub async fn kernel_info(
@@ -246,6 +338,23 @@ pub async fn run_shell(
     initial_command: Option<&str>,
     refresher: Option<TokenRefresher>,
 ) -> Result<()> {
+    run_shell_with_secrets(
+        client,
+        server,
+        initial_command,
+        refresher,
+        &SecretBundle::default(),
+    )
+    .await
+}
+
+pub async fn run_shell_with_secrets(
+    client: &ColabClient,
+    server: &StoredServer,
+    initial_command: Option<&str>,
+    refresher: Option<TokenRefresher>,
+    secrets: &SecretBundle,
+) -> Result<()> {
     let ws_url = colab_tty_ws_url(&server.proxy_url, &server.proxy_token)?;
     crate::cocli::debug::debug1("run.shell transport=colab_tty");
     crate::cocli::debug::debug1("run.shell websocket connecting path=/colab/tty");
@@ -265,6 +374,14 @@ pub async fn run_shell(
         let _ = send_colab_tty_resize(&mut ws_write, rows, cols).await;
     }
 
+    if !secrets.is_empty() {
+        let exports = shell_export_script(secrets);
+        let _ = send_colab_tty_input(
+            &mut ws_write,
+            &format!("stty -echo 2>/dev/null\n{exports}\nstty echo 2>/dev/null\n"),
+        )
+        .await;
+    }
     if let Some(cmd) = initial_command {
         let _ = send_colab_tty_input(&mut ws_write, &format!("{cmd}\n")).await;
     }
@@ -304,12 +421,14 @@ pub async fn run_shell(
                 Ok(Some(Ok(tungstenite::Message::Text(text)))) => {
                     if let Some(data) = parse_colab_tty_frame(text.as_ref()) {
                         let mut stdout = io::stdout().lock();
+                        let data = secrets.redact_text(&data);
                         let _ = stdout.write_all(data.as_bytes());
                         let _ = stdout.flush();
                     }
                 }
                 Ok(Some(Ok(tungstenite::Message::Binary(data)))) => {
                     let mut stdout = io::stdout().lock();
+                    let data = redact_bytes(&data, secrets);
                     let _ = stdout.write_all(&data);
                     let _ = stdout.flush();
                 }
@@ -380,12 +499,14 @@ pub async fn run_shell(
                     Some(Ok(tungstenite::Message::Text(text))) => {
                         if let Some(data) = parse_colab_tty_frame(text.as_ref()) {
                             let mut stdout = io::stdout().lock();
+                            let data = secrets.redact_text(&data);
                             let _ = stdout.write_all(data.as_bytes());
                             let _ = stdout.flush();
                         }
                     }
                     Some(Ok(tungstenite::Message::Binary(data))) => {
                         let mut stdout = io::stdout().lock();
+                        let data = redact_bytes(&data, secrets);
                         let _ = stdout.write_all(&data);
                         let _ = stdout.flush();
                     }
@@ -460,6 +581,24 @@ fn shell_unavailable_error(error: tungstenite::Error) -> ColabError {
     ColabError::config(
         "Shell is not available on this runtime\nfix: use `colab-cli run py --code \"...\"`\n     or open the browser session with `colab-cli session url --open`",
     )
+}
+
+fn shell_export_script(secrets: &SecretBundle) -> String {
+    secrets
+        .env_pairs()
+        .map(|(key, value)| format!("export {key}={}", shell_quote(value)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn redact_bytes(data: &[u8], secrets: &SecretBundle) -> Vec<u8> {
+    if secrets.is_empty() {
+        return data.to_vec();
+    }
+    match std::str::from_utf8(data) {
+        Ok(text) => secrets.redact_text(text).into_bytes(),
+        Err(_) => data.to_vec(),
+    }
 }
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
@@ -902,6 +1041,20 @@ fn collect_cell_message(value: &serde_json::Value, out: &mut CellOutput) {
     }
 }
 
+fn redact_cell_output(out: &mut CellOutput, secrets: &SecretBundle) {
+    if secrets.is_empty() {
+        return;
+    }
+    out.stdout = secrets.redact_text(&out.stdout);
+    out.stderr = secrets.redact_text(&out.stderr);
+    if let Some(value) = &mut out.error_value {
+        *value = secrets.redact_text(value);
+    }
+    for line in &mut out.traceback {
+        *line = secrets.redact_text(line);
+    }
+}
+
 fn append_text_plain(value: Option<&serde_json::Value>, out: &mut String) {
     match value {
         Some(serde_json::Value::String(s)) => {
@@ -937,12 +1090,21 @@ pub async fn run_passthrough(
     server: &StoredServer,
     argv: &[String],
 ) -> Result<i32> {
+    run_passthrough_with_secrets(client, server, argv, &SecretBundle::default()).await
+}
+
+pub async fn run_passthrough_with_secrets(
+    client: &ColabClient,
+    server: &StoredServer,
+    argv: &[String],
+    secrets: &SecretBundle,
+) -> Result<i32> {
     let term = client
         .create_terminal(&server.proxy_url, &server.proxy_token)
         .await?;
     let terminal_name = term.name.clone();
 
-    let result = run_passthrough_inner(client, server, &terminal_name, argv).await;
+    let result = run_passthrough_inner(client, server, &terminal_name, argv, secrets).await;
 
     // always reap the remote terminal, even on error
     let _ = client
@@ -957,6 +1119,7 @@ async fn run_passthrough_inner(
     server: &StoredServer,
     terminal_name: &str,
     argv: &[String],
+    secrets: &SecretBundle,
 ) -> Result<i32> {
     let ws_url = client.terminal_ws_url(&server.proxy_url, terminal_name);
     let request = build_ws_request(&ws_url, &server.proxy_token)?;
@@ -994,6 +1157,11 @@ async fn run_passthrough_inner(
         .map(|s| shell_quote(s))
         .collect::<Vec<_>>()
         .join(" ");
+    let user_cmd = if secrets.is_empty() {
+        user_cmd
+    } else {
+        format!("{}; {user_cmd}", shell_export_script(secrets))
+    };
 
     // braces isolate $? for the user command. stderr→stdout because the
     // jupyter terminal only gives us one fd back.
@@ -1068,7 +1236,8 @@ async fn run_passthrough_inner(
                     if let Some(idx) = find_subseq(&buf, &end_marker) {
                         if idx > 0 {
                             let mut stdout = io::stdout().lock();
-                            let _ = stdout.write_all(&buf[..idx]);
+                            let data = redact_bytes(&buf[..idx], secrets);
+                            let _ = stdout.write_all(&data);
                             let _ = stdout.flush();
                         }
                         let after = idx + end_marker.len();
@@ -1082,7 +1251,8 @@ async fn run_passthrough_inner(
                     if buf.len() > keep {
                         let flush_to = buf.len() - keep;
                         let mut stdout = io::stdout().lock();
-                        let _ = stdout.write_all(&buf[..flush_to]);
+                        let data = redact_bytes(&buf[..flush_to], secrets);
+                        let _ = stdout.write_all(&data);
                         let _ = stdout.flush();
                         buf.drain(..flush_to);
                     }
@@ -1100,7 +1270,8 @@ async fn run_passthrough_inner(
     // ws closed mid-stream — flush whatever's left so we don't drop output
     if matches!(phase, Phase::Mid) && !buf.is_empty() {
         let mut stdout = io::stdout().lock();
-        let _ = stdout.write_all(&buf);
+        let data = redact_bytes(&buf, secrets);
+        let _ = stdout.write_all(&data);
         let _ = stdout.flush();
     }
 
