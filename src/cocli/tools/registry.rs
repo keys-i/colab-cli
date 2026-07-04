@@ -84,12 +84,12 @@ impl BuiltinTool {
             Self::RunScript => "run.script",
             Self::ExecPython => "run.python",
             Self::ExecNotebook => "run.notebook",
-            Self::RunInstall => "run.install",
+            Self::RunInstall => "run.pip.install",
             Self::FsList => "fs.list",
             Self::FsPush => "fs.push",
             Self::FsPull => "fs.pull",
             Self::FsSync => "fs.sync",
-            Self::EnvInstall => "run.install",
+            Self::EnvInstall => "run.pip.install",
             Self::DriveStatus => "fs.drive.status",
             Self::DriveMount => "fs.drive.mount",
             Self::ContinueSave => "continue.save",
@@ -97,10 +97,10 @@ impl BuiltinTool {
             Self::RuntimeInfo => "runtime.info",
             Self::StatusRuntime => "status.runtime",
             Self::Doctor => "status.check",
-            Self::SlurpPlan => "slurp.plan",
-            Self::SlurpRun => "slurp.run",
-            Self::FleetPlan => "fleet.plan",
-            Self::FleetStatus => "fleet.status",
+            Self::SlurpPlan => "recipe.plan",
+            Self::SlurpRun => "recipe.run",
+            Self::FleetPlan => "distribute.plan",
+            Self::FleetStatus => "distribute.status",
             Self::AgentPlan => "agent.plan",
             Self::AgentAudit => "agent.audit",
         }
@@ -327,7 +327,13 @@ impl BuiltinTool {
             Self::RunScript => session_cmd("run", "script", get("session")),
             Self::ExecPython => session_cmd("run", "py", get("session")),
             Self::ExecNotebook => session_cmd("run", "notebook", get("session")),
-            Self::RunInstall | Self::EnvInstall => session_cmd("run", "install", get("session")),
+            Self::RunInstall | Self::EnvInstall => {
+                let mut cmd = vec!["run".into(), "pip".into(), "install".into()];
+                if let Some(session) = get("session") {
+                    cmd.extend(["--session".into(), session.into()]);
+                }
+                cmd
+            }
             Self::FsList => vec![
                 "fs".into(),
                 "ls".into(),
@@ -381,12 +387,17 @@ impl BuiltinTool {
             Self::RuntimeInfo => vec!["status".into(), "runtime".into()],
             Self::StatusRuntime => vec!["status".into(), "runtime".into(), "--all".into()],
             Self::Doctor => vec!["status".into(), "check".into()],
-            Self::SlurpPlan => vec!["slurp".into(), "plan".into()],
-            Self::SlurpRun => vec!["slurp".into(), "run".into(), "--dry-run".into()],
-            Self::FleetPlan => vec!["fleet".into(), "plan".into(), "--cost".into()],
-            Self::FleetStatus => vec!["status".into(), "fleet".into()],
-            Self::AgentPlan => vec!["agent".into(), "plan".into()],
-            Self::AgentAudit => vec!["agent".into(), "audit-plan".into()],
+            Self::SlurpPlan => vec!["distribute".into(), "recipe".into(), "explain".into()],
+            Self::SlurpRun => vec![
+                "distribute".into(),
+                "recipe".into(),
+                "run".into(),
+                "--dry-run".into(),
+            ],
+            Self::FleetPlan => vec!["distribute".into(), "plan".into(), "--cost".into()],
+            Self::FleetStatus => vec!["distribute".into(), "status".into()],
+            Self::AgentPlan => vec!["ai".into(), "plan".into()],
+            Self::AgentAudit => vec!["ai".into(), "audit".into()],
         }
     }
 }

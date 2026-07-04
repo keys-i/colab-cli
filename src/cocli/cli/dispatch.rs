@@ -7,13 +7,14 @@ use colored::Colorize;
 
 use crate::cocli::auth;
 use crate::cocli::cli::{
-    AgentCommands, AiCommands, AiMcpCommands, AiToolsCommands, AuthCommands, AuthProfileArgs, Cli,
-    Commands, CompatTransferArgs, ConfigCommands, ContinueCommands, EnvCommands, ExecCommands,
-    FileCommands, FleetCommands, FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands,
-    FsSyncArgs, MountCommands, RunCommands, RuntimeCommands, ServerCommands, SessionCommands,
-    SessionNameArg, SessionNewArgs, SettingsCommands, SettingsExperimentsCommands,
-    SettingsUiCommands, SkillCommands, SlurpCommands, StatusCommands, SupportCommands,
-    ToolsCommands,
+    AgentCommands, AiCodeCommands, AiCommands, AiMcpCommands, AiToolsCommands, AuthCommands,
+    AuthProfileArgs, Cli, Commands, CompatTransferArgs, ConfigCommands, ContinueCommands,
+    DistributeCommands, DistributePoolCommands, DistributeRecipeCommands, DistributeRunArgs,
+    DistributeShardCommands, EnvCommands, ExecCommands, FileCommands, FleetCommands,
+    FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, MountCommands,
+    PipCommands, RunCommands, RuntimeCommands, ServerCommands, SessionCommands, SessionNameArg,
+    SessionNewArgs, SettingsCommands, SettingsExperimentsCommands, SettingsUiCommands,
+    SkillCommands, SlurpCommands, StatusCommands, SupportCommands, ToolsCommands,
 };
 #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 use crate::cocli::cli::{DevCommands, ReleaseCommands};
@@ -112,6 +113,11 @@ fn print_error_json(e: &ColabError, verbose: bool) {
             }
             value
         }
+        ColabError::Config(message) => serde_json::json!({
+            "kind": error_kind(e),
+            "message": message,
+            "next_action": error_next_action(e),
+        }),
         _ => serde_json::json!({
             "kind": error_kind(e),
             "message": e.to_string(),
@@ -166,6 +172,7 @@ fn print_human_error(e: &ColabError, verbose: bool, ui: Ui) {
                 eprintln!("\n{}", trim_raw(raw));
             }
         }
+        ColabError::Config(message) => eprintln!("{message}"),
         _ => ui.error(&e.to_string()),
     }
 }
@@ -300,13 +307,10 @@ fn interaction_allowed(cli: &Cli, stdout_tty: bool, stdin_tty: bool, ci: bool) -
 }
 
 fn handle_launcher(ui: Ui) -> Result<()> {
-    if ui.plain {
-        println!("Google Colab from the terminal");
-        println!("run: colab-cli --help");
-    } else {
-        println!("{}", "Google Colab from the terminal".bright_cyan().bold());
-        println!("run: {}", "colab-cli --help".bright_cyan());
-    }
+    let _ = ui;
+    let mut cmd = Cli::command();
+    cmd.print_help()?;
+    println!();
     Ok(())
 }
 
@@ -361,14 +365,23 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             migration(&ui, "colab-cli ai tools ...");
             handle_tools(command, ui, json)
         }
-        Some(Commands::Fleet { command }) => handle_fleet(command, ui, json),
+        Some(Commands::Fleet { command }) => {
+            migration(&ui, "colab-cli distribute pool ...");
+            handle_fleet(command, ui, json)
+        }
+        Some(Commands::Distribute { command }) => handle_distribute(command, ui, json),
         Some(Commands::Ai { command }) => handle_ai(command, ui, json),
-        Some(Commands::Slurp { command }) => handle_slurp(command, ui, json),
+        Some(Commands::Slurp { command }) => {
+            migration(&ui, "colab-cli distribute recipe ...");
+            require_experiment("distribute", |cfg| cfg.experiments.distribute)?;
+            handle_slurp(command, ui, json)
+        }
         Some(Commands::Agent { command }) => {
             migration(&ui, "colab-cli ai ...");
             handle_agent(command, ui, json)
         }
         Some(Commands::Continue { command }) => {
+            require_experiment("continue", |cfg| cfg.experiments.continue_work)?;
             let config = ColabConfig::load(cli.quiet)?;
             handle_continue(command, &config, ui, json).await
         }
@@ -432,11 +445,15 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             Ok(())
         }
         AuthCommands::Add(args) => {
-            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
             handle_auth_add(args, ui)
         }
         AuthCommands::List { show_private } => {
-            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
             let store = load_auth_profiles()?;
             let out: Vec<_> = store
                 .profiles
@@ -449,7 +466,9 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             )
         }
         AuthCommands::Status { name, show_private } => {
-            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
             let store = load_auth_profiles()?;
             let profile = store
                 .get(&name)
@@ -460,7 +479,9 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             name,
             allow_fallback_account,
         } => {
-            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
             let mut store = load_auth_profiles()?;
             let profile = store
                 .get(&name)
@@ -483,7 +504,9 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             Ok(())
         }
         AuthCommands::Remove { name } => {
-            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
             let mut store = load_auth_profiles()?;
             if !store.remove(&name) {
                 return Err(ColabError::config(format!(
@@ -506,7 +529,9 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             print_value(json, &data)
         }
         AuthCommands::ExportRedacted { show_private } => {
-            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
             let store = load_auth_profiles()?;
             let mut value = serde_json::to_value(&store)?;
             if !show_private
@@ -530,7 +555,9 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
             Ok(())
         }
         AuthCommands::Limits { name } => {
-            require_experiment(|cfg| cfg.experiments.multi_login)?;
+            require_experiment("multi-login", |cfg| {
+                cfg.experiments.distribute && cfg.experiments.multi_login
+            })?;
             let store = load_auth_profiles()?;
             let profile = store
                 .get(&name)
@@ -680,8 +707,13 @@ async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Res
         RunCommands::Script {
             script,
             session,
+            ast,
             args,
         } => {
+            if ast {
+                require_experiment("ast observer", |cfg| cfg.experiments.ast_observer)?;
+                print_code_outline(&script, false)?;
+            }
             handle_exec(
                 ExecCommands::Run {
                     script,
@@ -700,7 +732,12 @@ async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Res
             notebook,
             session,
             out,
+            ast,
         } => {
+            if ast {
+                require_experiment("ast observer", |cfg| cfg.experiments.ast_observer)?;
+                print_code_outline(&notebook, false)?;
+            }
             handle_exec(
                 ExecCommands::Nb {
                     notebook,
@@ -718,11 +755,13 @@ async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Res
         RunCommands::Shell { session } => {
             handle_exec(ExecCommands::Shell { session }, config, ui).await
         }
+        RunCommands::Pip { command } => handle_run_pip(command, config, ui).await,
         RunCommands::Install {
             packages,
             requirements,
             session,
         } => {
+            migration(&ui, "colab-cli run pip install ...");
             if let Some(requirements) = requirements {
                 if !packages.is_empty() {
                     return Err(ColabError::config(
@@ -743,12 +782,14 @@ async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Res
             }
         }
         RunCommands::Freeze { session } => {
+            migration(&ui, "colab-cli run pip freeze");
             handle_env(EnvCommands::Freeze { session }, config, ui).await
         }
         RunCommands::Restore {
             requirements,
             session,
         } => {
+            migration(&ui, "colab-cli run pip restore requirements.txt");
             handle_env(
                 EnvCommands::Restore {
                     requirements,
@@ -765,6 +806,94 @@ async fn handle_run_space(cmd: RunCommands, config: &ColabConfig, ui: Ui) -> Res
         RunCommands::History => Err(ColabError::config(
             "run history has no command store yet - rerun commands explicitly",
         )),
+    }
+}
+
+async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+    match cmd {
+        PipCommands::Install {
+            packages,
+            requirements,
+            session,
+        } => {
+            if let Some(requirements) = requirements {
+                if !packages.is_empty() {
+                    return Err(ColabError::config(
+                        "run pip install accepts packages or -r requirements.txt, not both",
+                    ));
+                }
+                handle_env(
+                    EnvCommands::Restore {
+                        requirements,
+                        session,
+                    },
+                    config,
+                    ui,
+                )
+                .await
+            } else {
+                handle_env(EnvCommands::Install { packages, session }, config, ui).await
+            }
+        }
+        PipCommands::Freeze { session } => {
+            handle_env(EnvCommands::Freeze { session }, config, ui).await
+        }
+        PipCommands::Restore {
+            requirements,
+            session,
+        } => {
+            handle_env(
+                EnvCommands::Restore {
+                    requirements,
+                    session,
+                },
+                config,
+                ui,
+            )
+            .await
+        }
+        PipCommands::Check { session } => {
+            handle_run(
+                config,
+                ui,
+                session,
+                vec!["python".into(), "-m".into(), "pip".into(), "check".into()],
+            )
+            .await
+        }
+        PipCommands::List { session } => {
+            handle_run(
+                config,
+                ui,
+                session,
+                vec!["python".into(), "-m".into(), "pip".into(), "list".into()],
+            )
+            .await
+        }
+        PipCommands::Tree { session } => {
+            handle_run(
+                config,
+                ui,
+                session,
+                vec!["python".into(), "-m".into(), "pip".into(), "list".into()],
+            )
+            .await
+        }
+        PipCommands::Cache { session } => {
+            handle_run(
+                config,
+                ui,
+                session,
+                vec![
+                    "python".into(),
+                    "-m".into(),
+                    "pip".into(),
+                    "cache".into(),
+                    "info".into(),
+                ],
+            )
+            .await
+        }
     }
 }
 
@@ -1495,19 +1624,19 @@ async fn handle_status(
         ),
         Some(StatusCommands::Slurp { config }) => print_value_or_kv(
             json,
-            "slurp",
+            "recipe",
             &serde_json::json!({
                 "config": config,
                 "exists": Path::new(&config).exists(),
-                "next_action": if Path::new(&config).exists() { "run `colab-cli slurp explain`" } else { "run `colab-cli slurp init`" }
+                "next_action": if Path::new(&config).exists() { "run `colab-cli distribute recipe explain`" } else { "run `colab-cli distribute recipe init`" }
             }),
         ),
         Some(StatusCommands::Fleet { config }) => {
             let cfg = load_cocli_config().unwrap_or_default();
-            if !cfg.experiments.fleet {
+            if !cfg.experiments.distribute {
                 return print_value_or_kv(
                     json,
-                    "fleet",
+                    "distribute",
                     &serde_json::json!({
                         "enabled": false,
                         "experimental": true,
@@ -1529,11 +1658,11 @@ async fn handle_status(
             } else {
                 print_value_or_kv(
                     json,
-                    "fleet",
+                    "distribute",
                     &serde_json::json!({
                         "config": config,
                         "exists": false,
-                        "next_action": "run `colab-cli slurp init`"
+                        "next_action": "run `colab-cli distribute recipe init`"
                     }),
                 )
             }
@@ -1588,7 +1717,7 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
     let files_ready = cache_writable(&config.data_dir);
 
     let cfg = load_cocli_config().unwrap_or_default();
-    let slurp_exists = Path::new("slurp.toml").exists();
+    let recipe_exists = Path::new("cocli.recipe.toml").exists() || Path::new("slurp.toml").exists();
     let fix = if account.is_none() {
         Some("run colab-cli auth login".to_string())
     } else if !has_session {
@@ -1644,25 +1773,30 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
                 message: "not checked".to_string(),
             },
             StatusLine {
-                name: "Slurp",
-                state: if slurp_exists { "ready" } else { "idle" },
-                message: if slurp_exists {
-                    "config found".to_string()
+                name: "Recipe",
+                state: if recipe_exists { "ready" } else { "idle" },
+                message: if recipe_exists {
+                    "recipe found".to_string()
                 } else {
-                    "no config".to_string()
+                    "no recipe".to_string()
                 },
             },
             StatusLine {
-                name: "Fleet",
-                state: if cfg.experiments.fleet {
-                    "info"
+                name: "Distribute",
+                state: "idle",
+                message: if cfg.experiments.distribute {
+                    "on".to_string()
                 } else {
-                    "idle"
+                    "off".to_string()
                 },
-                message: if cfg.experiments.fleet {
-                    "experimental on".to_string()
+            },
+            StatusLine {
+                name: "Continue",
+                state: "idle",
+                message: if cfg.experiments.continue_work {
+                    "on".to_string()
                 } else {
-                    "off experimental".to_string()
+                    "off".to_string()
                 },
             },
         ],
@@ -1855,7 +1989,13 @@ fn handle_tools(cmd: ToolsCommands, ui: Ui, json: bool) -> Result<()> {
 fn handle_settings(cmd: Option<SettingsCommands>, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         None => print_settings_overview(json, ui),
-        Some(SettingsCommands::Get { key: None }) => handle_config(ConfigCommands::Get, json),
+        Some(SettingsCommands::Get { key: None }) => {
+            if json {
+                handle_config(ConfigCommands::Get, true)
+            } else {
+                print_settings_overview(false, ui)
+            }
+        }
         Some(SettingsCommands::Get { key: Some(key) }) => handle_config_get_key(&key, json),
         Some(SettingsCommands::Set { key, value }) => {
             handle_config(ConfigCommands::Set { key, value }, json)
@@ -1992,7 +2132,7 @@ fn handle_settings_ui(command: Option<SettingsUiCommands>, ui: Ui, json: bool) -
             if json {
                 print_value(true, &cfg.ui)
             } else {
-                render_ui_settings(ui, false)
+                render_ui_settings(Ui::new(ui.quiet, ui.plain, false), false)
             }
         }
         Some(SettingsUiCommands::Get { key: Some(key) }) => {
@@ -2052,19 +2192,27 @@ fn handle_settings_experiments(
         None => render_experiments(ui, json),
         Some(SettingsExperimentsCommands::Get { key: None }) => {
             let cfg = load_cocli_config()?;
-            print_value(json, &cfg.experiments)
+            if json {
+                print_value(true, &cfg.experiments)
+            } else {
+                for item in experiment_items(&cfg) {
+                    println!(
+                        "[{}] {:<28} {}",
+                        if item.enabled { "x" } else { " " },
+                        item.label,
+                        muted(item.risk, ui)
+                    );
+                }
+                Ok(())
+            }
         }
         Some(SettingsExperimentsCommands::Get { key: Some(key) }) => handle_config_get_key(
-            &format!("experiments.{}", normalize_experiment_key(&key)),
+            &format!("experiments.{}", experiment_config_key(&key)),
             json,
         ),
-        Some(SettingsExperimentsCommands::Set { key, value }) => handle_config(
-            ConfigCommands::Set {
-                key: format!("experiments.{}", normalize_experiment_key(&key)),
-                value,
-            },
-            json,
-        ),
+        Some(SettingsExperimentsCommands::Set { key, value }) => {
+            handle_experiment_set(&normalize_experiment_key(&key), value, json)
+        }
         Some(SettingsExperimentsCommands::Reset) => {
             let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
             let mut cfg =
@@ -2100,12 +2248,13 @@ fn render_experiments(ui: Ui, json: bool) -> Result<()> {
                 .interact_opt()
                 .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?;
         if let Some(selected) = selected {
-            cfg.experiments.multi_login = selected.contains(&0);
-            cfg.experiments.fleet = selected.contains(&1);
-            cfg.experiments.mcp_server = selected.contains(&2);
-            cfg.experiments.ai_plan_runner = selected.contains(&3);
-            cfg.experiments.slurp_automation = selected.contains(&4);
-            cfg.experiments.background_live_checks = selected.contains(&5);
+            cfg.experiments.continue_work = selected.contains(&0);
+            cfg.experiments.distribute = selected.contains(&1);
+            cfg.experiments.multi_login = selected.contains(&2) && cfg.experiments.distribute;
+            cfg.experiments.mcp_server = selected.contains(&3);
+            cfg.experiments.ai_plan_runner = selected.contains(&4);
+            cfg.experiments.ast_observer = selected.contains(&5);
+            cfg.experiments.background_live_checks = selected.contains(&6);
             cfg.save(&path)
                 .map_err(|e| ColabError::config(e.to_string()))?;
         }
@@ -2134,17 +2283,22 @@ struct ExperimentItem {
     enabled: bool,
 }
 
-fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 6] {
+fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 7] {
     [
         ExperimentItem {
-            label: "Multi-login",
-            risk: "multiple profiles; never bypasses limits",
-            enabled: cfg.experiments.multi_login,
+            label: "Continue",
+            risk: "checkpoint/replay; not live memory",
+            enabled: cfg.experiments.continue_work,
         },
         ExperimentItem {
-            label: "Fleet/distributed planning",
-            risk: "planning only; no quota bypass",
-            enabled: cfg.experiments.fleet,
+            label: "Distribute",
+            risk: "recipes, pools, shards; no quota bypass",
+            enabled: cfg.experiments.distribute,
+        },
+        ExperimentItem {
+            label: "Multi-login",
+            risk: "locked unless Distribute is on",
+            enabled: cfg.experiments.multi_login,
         },
         ExperimentItem {
             label: "MCP server",
@@ -2157,9 +2311,9 @@ fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 6] {
             enabled: cfg.experiments.ai_plan_runner,
         },
         ExperimentItem {
-            label: "Slurp automation",
-            risk: "workflow execution after review",
-            enabled: cfg.experiments.slurp_automation,
+            label: "AST observer",
+            risk: "local read-only code outline",
+            enabled: cfg.experiments.ast_observer,
         },
         ExperimentItem {
             label: "Background live checks",
@@ -2171,6 +2325,59 @@ fn experiment_items(cfg: &config::CocliConfig) -> [ExperimentItem; 6] {
 
 fn normalize_experiment_key(key: &str) -> String {
     key.replace('-', "_")
+}
+
+fn experiment_config_key(key: &str) -> String {
+    match normalize_experiment_key(key).as_str() {
+        "continue" => "continue_work".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn handle_experiment_set(key: &str, value: String, json: bool) -> Result<()> {
+    let path = config::config_path().map_err(|e| ColabError::config(e.to_string()))?;
+    let mut cfg =
+        config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
+    let enabled = parse_bool(&value)?;
+    match key {
+        "continue" | "continue_work" => cfg.experiments.continue_work = enabled,
+        "distribute" => {
+            cfg.experiments.distribute = enabled;
+            cfg.experiments.fleet = enabled;
+            if !enabled {
+                cfg.experiments.multi_login = false;
+            }
+        }
+        "multi_login" => {
+            if enabled && !cfg.experiments.distribute {
+                return Err(ColabError::config(
+                    "multi-login requires distribute\nenable: colab-cli settings experiments set distribute true",
+                ));
+            }
+            cfg.experiments.multi_login = enabled;
+        }
+        "mcp_server" => cfg.experiments.mcp_server = enabled,
+        "ai_plan_runner" => cfg.experiments.ai_plan_runner = enabled,
+        "ast_observer" => cfg.experiments.ast_observer = enabled,
+        "background_live_checks" => cfg.experiments.background_live_checks = enabled,
+        "fleet" => {
+            cfg.experiments.distribute = enabled;
+            cfg.experiments.fleet = enabled;
+        }
+        "slurp_automation" => {
+            cfg.experiments.distribute = enabled;
+            cfg.experiments.slurp_automation = enabled;
+        }
+        _ => return Err(ColabError::config(format!("unknown experiment: {key}"))),
+    }
+    cfg.save(&path)
+        .map_err(|e| ColabError::config(e.to_string()))?;
+    if json {
+        print_value(true, &serde_json::json!({ key: enabled }))
+    } else {
+        println!("{key} {}", on_off(enabled));
+        Ok(())
+    }
 }
 
 fn experiments_summary(cfg: &config::CocliConfig) -> String {
@@ -2461,20 +2668,26 @@ fn print_skill_catalog(title: &str, subtitle: &str, rows: &[SkillRow], ui: Ui) -
     println!("{}", heading(title, ui));
     println!("{subtitle}");
     println!();
-    println!(
-        "{:<18} {:<8} {:<15} {:<9} Summary",
-        "Tool", "Risk", "Needs session", "Network"
+    let table_rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            vec![
+                row.name.to_string(),
+                row.risk.to_string(),
+                yes_no(row.needs_session).to_string(),
+                yes_no(row.network).to_string(),
+                row.summary.to_string(),
+            ]
+        })
+        .collect();
+    print!(
+        "{}",
+        crate::cocli::ui::table::render_table(
+            &["Tool", "Risk", "Needs session", "Network", "Summary"],
+            &table_rows,
+            crate::cocli::ui::width::terminal_width()
+        )
     );
-    for row in rows {
-        println!(
-            "{:<18} {:<8} {:<15} {:<9} {}",
-            row.name,
-            row.risk,
-            yes_no(row.needs_session),
-            yes_no(row.network),
-            row.summary
-        );
-    }
     Ok(())
 }
 
@@ -2504,53 +2717,54 @@ fn skill_rows(category: Option<&str>, risk: Option<&str>, needs_session: bool) -
 }
 
 fn agent_skill_rows() -> Vec<SkillRow> {
-    vec![
+    let cfg = load_cocli_config().unwrap_or_default();
+    let mut rows = vec![
         skill(
-            "slurp.plan",
+            "recipe.plan",
             "workflow",
             "low",
             false,
             false,
-            "Explain a slurp.toml plan",
+            "Explain a recipe plan",
             &["config"],
             &["plan", "findings"],
-            &["colab-cli slurp plan --json"],
+            &["colab-cli distribute recipe explain --json"],
             &["Local read only"],
         ),
         skill(
-            "slurp.explain",
+            "recipe.explain",
             "workflow",
             "low",
             false,
             false,
-            "Render a clean Slurp plan explanation",
+            "Render a clean recipe explanation",
             &["config"],
             &["summary"],
-            &["colab-cli slurp explain --json"],
+            &["colab-cli distribute recipe explain --json"],
             &["Local read only"],
         ),
         skill(
-            "fleet.plan",
-            "fleet",
+            "distribute.plan",
+            "distribute",
             "med",
             false,
             false,
             "Plan approved runtime work",
             &["config", "cost"],
             &["plan", "compliance"],
-            &["colab-cli fleet plan --json"],
+            &["colab-cli distribute plan --json"],
             &["No quota bypass", "No hidden execution"],
         ),
         skill(
-            "fleet.status",
-            "fleet",
+            "distribute.status",
+            "distribute",
             "low",
             false,
             false,
-            "Show fleet planning status",
+            "Show distribute planning status",
             &["config"],
             &["status"],
-            &["colab-cli status fleet --json"],
+            &["colab-cli distribute status --json"],
             &["Local read only"],
         ),
         skill(
@@ -2626,6 +2840,30 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             &["No transport server starts unless requested"],
         ),
         skill(
+            "ast.outline",
+            "code",
+            "low",
+            false,
+            false,
+            "Outline local Python code",
+            &["file"],
+            &["imports", "functions", "classes"],
+            &["colab-cli ai ast file.py --json"],
+            &["Local read only"],
+        ),
+        skill(
+            "ast.watch",
+            "code",
+            "low",
+            false,
+            false,
+            "Watch a local code outline",
+            &["file"],
+            &["outline"],
+            &["colab-cli ai ast watch file.py --json"],
+            &["Local read only"],
+        ),
+        skill(
             "mcp.invoke",
             "agent",
             "med",
@@ -2634,7 +2872,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Plan a built-in tool invocation from JSON",
             &["name", "input"],
             &["planned_command"],
-            &["colab-cli settings skills run slurp.plan --json-input '{}'"],
+            &["colab-cli settings skills run recipe.plan --json-input '{}'"],
             &["Plans are inspectable before execution"],
         ),
         skill(
@@ -2661,7 +2899,11 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             &["colab-cli settings skills inspect agent.audit"],
             &["Destructive actions require confirmation"],
         ),
-    ]
+    ];
+    if !cfg.experiments.continue_work {
+        rows.retain(|row| !row.name.starts_with("continue."));
+    }
+    rows
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2740,8 +2982,146 @@ fn muted(text: &str, ui: Ui) -> String {
     }
 }
 
+fn handle_distribute(cmd: Option<DistributeCommands>, ui: Ui, json: bool) -> Result<()> {
+    require_experiment("distribute", |cfg| cfg.experiments.distribute)?;
+    match cmd {
+        None => {
+            println!("{}", heading("Distribute", ui));
+            println!("Experimental recipes, pools, and shards");
+            println!();
+            println!("  recipe      tiny TOML workflow config");
+            println!("  pool        approved runtime pool planning");
+            println!("  shard       split work into safe chunks");
+            Ok(())
+        }
+        Some(DistributeCommands::Plan(args)) => {
+            handle_fleet(FleetCommands::Plan(recipe_args(args)), ui, json)
+        }
+        Some(DistributeCommands::Status { config }) => {
+            let path = recipe_config(config);
+            let recipe_found = Path::new(&path).exists();
+            let multi_login = load_cocli_config()
+                .map(|cfg| cfg.experiments.multi_login)
+                .unwrap_or(false);
+            if json {
+                return print_value(
+                    true,
+                    &serde_json::json!({
+                    "enabled": true,
+                    "recipe": path,
+                    "recipe_found": recipe_found,
+                    "multi_login": multi_login
+                    }),
+                );
+            }
+            println!("{}", heading("Distribute status", ui));
+            println!("  enabled         yes");
+            println!("  recipe          {}", path_text(&path, ui));
+            println!("  recipe found    {}", yes_no(recipe_found));
+            println!("  multi-login     {}", on_off(multi_login));
+            Ok(())
+        }
+        Some(DistributeCommands::Explain(args)) => {
+            handle_slurp(SlurpCommands::Explain(recipe_args(args)), ui, json)
+        }
+        Some(DistributeCommands::Run(args)) => {
+            if !args.dry_run && !args.confirm {
+                return Err(ColabError::config(
+                    "distribute run requires --dry-run or --confirm",
+                ));
+            }
+            handle_fleet(FleetCommands::Exec(recipe_run_args(args)), ui, json)
+        }
+        Some(DistributeCommands::Resume(args)) => {
+            handle_fleet(FleetCommands::Exec(recipe_args(args)), ui, json)
+        }
+        Some(DistributeCommands::Clean) => {
+            print_value(json, &serde_json::json!({ "ok": true, "cleaned": 0 }))
+        }
+        Some(DistributeCommands::Recipe { command }) => match command {
+            DistributeRecipeCommands::Init { out } => {
+                handle_slurp(SlurpCommands::Init { out }, ui, json)
+            }
+            DistributeRecipeCommands::Check(args) => {
+                handle_slurp(SlurpCommands::Check(recipe_args(args)), ui, json)
+            }
+            DistributeRecipeCommands::Explain(args) => {
+                handle_slurp(SlurpCommands::Explain(recipe_args(args)), ui, json)
+            }
+            DistributeRecipeCommands::Run(args) => {
+                if !args.dry_run && !args.confirm {
+                    return Err(ColabError::config(
+                        "distribute recipe run requires --dry-run or --confirm",
+                    ));
+                }
+                handle_fleet(FleetCommands::Exec(recipe_run_args(args)), ui, json)
+            }
+        },
+        Some(DistributeCommands::Pool { command }) => match command {
+            DistributePoolCommands::Plan(args) => {
+                handle_fleet(FleetCommands::Plan(recipe_args(args)), ui, json)
+            }
+            DistributePoolCommands::Status { config } => {
+                let args = FleetConfigArgs {
+                    config,
+                    dry_run: true,
+                    cost: false,
+                    allow_fallback_account: false,
+                };
+                handle_fleet(FleetCommands::Plan(recipe_args(args)), ui, json)
+            }
+            DistributePoolCommands::Cost(mut args) => {
+                args.cost = true;
+                handle_fleet(FleetCommands::Plan(recipe_args(args)), ui, json)
+            }
+            DistributePoolCommands::Logs => print_value(json, &serde_json::json!({ "logs": [] })),
+        },
+        Some(DistributeCommands::Shard { command }) => match command {
+            DistributeShardCommands::Plan(args) => {
+                handle_fleet(FleetCommands::Plan(recipe_args(args)), ui, json)
+            }
+            DistributeShardCommands::Run(args) => {
+                if !args.dry_run && !args.confirm {
+                    return Err(ColabError::config(
+                        "distribute shard run requires --dry-run or --confirm",
+                    ));
+                }
+                handle_fleet(FleetCommands::Exec(recipe_run_args(args)), ui, json)
+            }
+            DistributeShardCommands::Resume(args) => {
+                handle_fleet(FleetCommands::Exec(recipe_args(args)), ui, json)
+            }
+        },
+    }
+}
+
+fn recipe_args(mut args: FleetConfigArgs) -> FleetConfigArgs {
+    args.config = recipe_config(args.config);
+    args
+}
+
+fn recipe_run_args(args: DistributeRunArgs) -> FleetConfigArgs {
+    FleetConfigArgs {
+        config: recipe_config(args.config),
+        dry_run: args.dry_run,
+        cost: args.cost,
+        allow_fallback_account: args.allow_fallback_account,
+    }
+}
+
+fn recipe_config(config: String) -> String {
+    if config == "cocli.recipe.toml"
+        && !Path::new(&config).exists()
+        && Path::new("slurp.toml").exists()
+    {
+        "slurp.toml".to_string()
+    } else {
+        config
+    }
+}
+
 fn handle_fleet(cmd: FleetCommands, ui: Ui, json: bool) -> Result<()> {
-    require_experiment(|cfg| cfg.experiments.fleet)?;
+    require_experiment("distribute", |cfg| cfg.experiments.distribute)?;
     match cmd {
         FleetCommands::Plan(args) => {
             let (cfg, plan, findings) = fleet_plan_from_args(&args)?;
@@ -2754,16 +3134,15 @@ fn handle_fleet(cmd: FleetCommands, ui: Ui, json: bool) -> Result<()> {
                 return print_fleet_plan(&cfg, &plan, &findings, json || args.cost);
             }
             Err(ColabError::config(
-                "fleet execution is deferred; run `colab-cli fleet plan --cost`",
+                "distribute execution is deferred; run `colab-cli distribute plan --cost`",
             ))
         }
         FleetCommands::Doctor => {
             migration(&ui, "colab-cli status fleet");
             let data = serde_json::json!({
-                "fleet_mode": "compliant",
-                "free_tier_cluster_backend": false,
+                "distribute_mode": "compliant",
                 "fallback_rotation": false,
-                "next_action": "run `colab-cli fleet plan --config slurp.toml`"
+                "next_action": "run `colab-cli distribute plan --config cocli.recipe.toml`"
             });
             print_value(json, &data)
         }
@@ -2774,7 +3153,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         SlurpCommands::Init { out } => {
             if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                print!("Slurp name [llama-batch-run]: ");
+                print!("Recipe name [llama-batch-run]: ");
                 std::io::stdout().flush()?;
                 let mut name = String::new();
                 std::io::stdin().read_line(&mut name)?;
@@ -2793,7 +3172,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
                 std::fs::write(&out, crate::cocli::slurp::config::SlurpConfig::sample())?;
             }
             if !ui.quiet {
-                println!("slurp ▸ tiny plan, big snack");
+                println!("recipe written");
             }
             ui.success(&format!("wrote {out}"));
             Ok(())
@@ -2805,7 +3184,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
         }
         SlurpCommands::Plan(args) => handle_fleet(FleetCommands::Plan(args), ui, json),
         SlurpCommands::Run(args) | SlurpCommands::Resume(args) => {
-            require_experiment(|cfg| cfg.experiments.slurp_automation)?;
+            require_experiment("distribute", |cfg| cfg.experiments.distribute)?;
             handle_fleet(FleetCommands::Exec(args), ui, json)
         }
         SlurpCommands::Explain(args) => {
@@ -2913,16 +3292,16 @@ fn handle_agent(cmd: AgentCommands, ui: Ui, json: bool) -> Result<()> {
                 || goal.to_ascii_lowercase().contains("keepalive")
             {
                 return Err(ColabError::config(
-                    "agent Slurp drafts cannot suggest bypassing limits or anti-idle scripts",
+                    "agent recipe drafts cannot suggest bypassing limits or anti-idle scripts",
                 ));
             }
             let plan = crate::cocli::slurp::config::SlurpConfig::sample();
             let body = format!(
-                "# compliance: Slurp can plan this, but it will not bypass Colab rules\n# goal: {goal}\n{plan}"
+                "# compliance: recipe planning will not bypass Colab rules\n# goal: {goal}\n{plan}"
             );
             if let Some(out) = out {
                 std::fs::write(&out, body)?;
-                ui.success(&format!("Slurp draft written: {out}"));
+                ui.success(&format!("recipe draft written: {out}"));
             } else {
                 print!("{body}");
             }
@@ -2940,21 +3319,160 @@ fn handle_agent(cmd: AgentCommands, ui: Ui, json: bool) -> Result<()> {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+struct CodeOutline {
+    file: String,
+    kind: String,
+    imports: Vec<String>,
+    functions: Vec<String>,
+    classes: Vec<String>,
+    cells: usize,
+    main_guard: bool,
+    top_level_calls: Vec<String>,
+    shell_escapes: Vec<String>,
+    deps: Vec<String>,
+}
+
+fn print_code_outline(path: &str, json: bool) -> Result<()> {
+    let outline = code_outline(path)?;
+    if json {
+        return print_value(true, &outline);
+    }
+    println!("{}", heading("AST outline", Ui::new(false, false, false)));
+    println!("  file            {}", outline.file);
+    println!("  kind            {}", outline.kind);
+    if outline.cells > 0 {
+        println!("  notebook cells  {}", outline.cells);
+    }
+    print_outline_list("imports", &outline.imports);
+    print_outline_list("classes", &outline.classes);
+    print_outline_list("functions", &outline.functions);
+    print_outline_list("top calls", &outline.top_level_calls);
+    print_outline_list("shell escapes", &outline.shell_escapes);
+    print_outline_list("deps", &outline.deps);
+    println!("  main guard      {}", yes_no(outline.main_guard));
+    Ok(())
+}
+
+fn print_outline_list(label: &str, values: &[String]) {
+    if values.is_empty() {
+        return;
+    }
+    println!("  {label:<14} {}", values.join(", "));
+}
+
+fn code_outline(path: &str) -> Result<CodeOutline> {
+    let body = std::fs::read_to_string(path)?;
+    if path.ends_with(".ipynb") {
+        let value: serde_json::Value = serde_json::from_str(&body)?;
+        let cells = value
+            .get("cells")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut code = String::new();
+        let mut count = 0usize;
+        for cell in cells {
+            if cell.get("cell_type").and_then(serde_json::Value::as_str) == Some("code") {
+                count += 1;
+                if let Some(source) = cell.get("source") {
+                    if let Some(lines) = source.as_array() {
+                        for line in lines {
+                            code.push_str(line.as_str().unwrap_or_default());
+                        }
+                    } else if let Some(source) = source.as_str() {
+                        code.push_str(source);
+                    }
+                }
+                code.push('\n');
+            }
+        }
+        let mut outline = python_outline(path, &code);
+        outline.kind = "notebook".to_string();
+        outline.cells = count;
+        Ok(outline)
+    } else {
+        Ok(python_outline(path, &body))
+    }
+}
+
+fn python_outline(path: &str, body: &str) -> CodeOutline {
+    let mut outline = CodeOutline {
+        file: path.to_string(),
+        kind: "python".to_string(),
+        imports: Vec::new(),
+        functions: Vec::new(),
+        classes: Vec::new(),
+        cells: 0,
+        main_guard: false,
+        top_level_calls: Vec::new(),
+        shell_escapes: Vec::new(),
+        deps: Vec::new(),
+    };
+    for line in body.lines() {
+        let trimmed = line.trim();
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if let Some(rest) = trimmed.strip_prefix("import ") {
+            let name = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or(rest)
+                .trim_end_matches(',');
+            push_unique(&mut outline.imports, name);
+            push_unique(&mut outline.deps, name.split('.').next().unwrap_or(name));
+        } else if let Some(rest) = trimmed.strip_prefix("from ") {
+            let name = rest.split_whitespace().next().unwrap_or(rest);
+            push_unique(&mut outline.imports, name);
+            push_unique(&mut outline.deps, name.split('.').next().unwrap_or(name));
+        } else if let Some(rest) = trimmed.strip_prefix("def ") {
+            push_unique(
+                &mut outline.functions,
+                rest.split('(').next().unwrap_or(rest),
+            );
+        } else if let Some(rest) = trimmed.strip_prefix("class ") {
+            push_unique(
+                &mut outline.classes,
+                rest.split(['(', ':']).next().unwrap_or(rest),
+            );
+        } else if trimmed.contains("__name__") && trimmed.contains("__main__") {
+            outline.main_guard = true;
+        } else if indent == 0 && trimmed.ends_with(')') && !trimmed.starts_with('#') {
+            push_unique(&mut outline.top_level_calls, trimmed);
+        }
+        if trimmed.starts_with('!')
+            || trimmed.contains("os.system(")
+            || trimmed.contains("subprocess.")
+        {
+            push_unique(&mut outline.shell_escapes, trimmed);
+        }
+    }
+    outline
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if !value.is_empty() && !values.iter().any(|existing| existing == value) {
+        values.push(value.to_string());
+    }
+}
+
 fn handle_ai(cmd: Option<AiCommands>, ui: Ui, json: bool) -> Result<()> {
     match cmd {
         None => {
             println!("{}", heading("AI", ui));
-            println!("Agent, MCP, and tool workflows");
+            println!("Agent, MCP, and code tools");
             println!();
             println!("  tools       list and inspect agent-friendly tools");
             println!("  plan        draft an inspectable plan");
             println!("  audit       check a saved plan");
+            println!("  ast         local code outline");
             println!("  mcp         disabled unless enabled in experiments");
             Ok(())
         }
         Some(AiCommands::Tools { command }) => handle_ai_tools(command, ui, json),
         Some(AiCommands::Mcp { command }) => handle_ai_mcp(command, json),
         Some(AiCommands::Plan { goal, out }) => {
+            require_experiment("ai plan runner", |cfg| cfg.experiments.ai_plan_runner)?;
             let plan = format!(
                 "goal = {goal:?}\nconfirm_required = true\n\n[[steps]]\ntool = \"ai.audit\"\ninput = {{}}\n"
             );
@@ -2991,15 +3509,45 @@ fn handle_ai(cmd: Option<AiCommands>, ui: Ui, json: bool) -> Result<()> {
             }
         }
         Some(AiCommands::Run { plan_file, confirm }) => {
-            require_experiment(|cfg| cfg.experiments.ai_plan_runner)?;
+            require_experiment("ai plan runner", |cfg| cfg.experiments.ai_plan_runner)?;
             if !confirm {
-                return Err(experiment_error("ai run requires --confirm"));
+                return Err(ColabError::config("ai run requires --confirm"));
             }
             let body = std::fs::read_to_string(&plan_file)?;
             append_audit(&format!("ai_run plan={plan_file} bytes={}", body.len()))?;
             ui.success("AI plan accepted for confirmed execution audit");
             Ok(())
         }
+        Some(AiCommands::Ast {
+            first,
+            second,
+            json: local_json,
+        }) => {
+            require_experiment("ast observer", |cfg| cfg.experiments.ast_observer)?;
+            let file = if first == "watch" {
+                second.ok_or_else(|| ColabError::config("ai ast watch needs a file"))?
+            } else {
+                first
+            };
+            print_code_outline(&file, json || local_json)
+        }
+        Some(AiCommands::Code { command }) => match command {
+            AiCodeCommands::Explain {
+                file,
+                json: local_json,
+            } => {
+                require_experiment("ast observer", |cfg| cfg.experiments.ast_observer)?;
+                print_code_outline(&file, json || local_json)
+            }
+            AiCodeCommands::Deps {
+                file,
+                json: local_json,
+            } => {
+                require_experiment("ast observer", |cfg| cfg.experiments.ast_observer)?;
+                let outline = code_outline(&file)?;
+                print_value(json || local_json, &outline.deps)
+            }
+        },
     }
 }
 
@@ -3028,7 +3576,7 @@ fn handle_ai_tools(cmd: Option<AiToolsCommands>, ui: Ui, json: bool) -> Result<(
 }
 
 fn handle_ai_mcp(cmd: Option<AiMcpCommands>, json: bool) -> Result<()> {
-    require_experiment(|cfg| cfg.experiments.mcp_server)?;
+    require_experiment("mcp server", |cfg| cfg.experiments.mcp_server)?;
     match cmd.unwrap_or(AiMcpCommands::Tools) {
         AiMcpCommands::Tools => {
             let rows = skill_rows(None, None, false);
@@ -3040,17 +3588,22 @@ fn handle_ai_mcp(cmd: Option<AiMcpCommands>, json: bool) -> Result<()> {
     }
 }
 
-fn require_experiment(enabled: impl FnOnce(&config::CocliConfig) -> bool) -> Result<()> {
+fn require_experiment(
+    name: &str,
+    enabled: impl FnOnce(&config::CocliConfig) -> bool,
+) -> Result<()> {
     let cfg = load_cocli_config()?;
     if enabled(&cfg) {
         Ok(())
     } else {
-        Err(experiment_error("experimental feature disabled"))
+        Err(experiment_error(name))
     }
 }
 
-fn experiment_error(message: &str) -> ColabError {
-    ColabError::config(format!("{message}\nenable: colab-cli settings experiments"))
+fn experiment_error(name: &str) -> ColabError {
+    ColabError::config(format!(
+        "experimental feature disabled: {name}\nenable: colab-cli settings experiments"
+    ))
 }
 
 async fn handle_continue(
@@ -3065,6 +3618,9 @@ async fn handle_continue(
             name,
             artifacts,
         } => {
+            let session =
+                session.ok_or_else(|| ColabError::config("continue save needs --session"))?;
+            let name = name.ok_or_else(|| ColabError::config("continue save needs --name"))?;
             let manager = make_manager(config)?;
             let servers = manager.list_local()?;
             let server = resolve_server(&servers, Some(&session))?;
@@ -3138,6 +3694,7 @@ async fn handle_continue(
             gpu,
             replay_all,
             dry_run,
+            confirm,
         } => {
             let manifest = read_continuation(config, &name)?;
             let mut steps = Vec::new();
@@ -3156,6 +3713,11 @@ async fn handle_continue(
                         "process_memory_restored": false
                     }),
                 );
+            }
+            if !confirm {
+                return Err(ColabError::config(
+                    "continue resume requires --dry-run or --confirm",
+                ));
             }
 
             if new_runtime {
@@ -3224,6 +3786,9 @@ fn handle_config(cmd: ConfigCommands, json: bool) -> Result<()> {
             print_value(json, &cfg)
         }
         ConfigCommands::Set { key, value } => {
+            if let Some(exp_key) = key.strip_prefix("experiments.") {
+                return handle_experiment_set(exp_key, value, json);
+            }
             let mut cfg =
                 config::CocliConfig::load(&path).map_err(|e| ColabError::config(e.to_string()))?;
             match key.as_str() {
@@ -3252,22 +3817,10 @@ fn handle_config(cmd: ConfigCommands, json: bool) -> Result<()> {
                 "support.redact_paths" => cfg.support.redact_paths = parse_bool(&value)?,
                 "support.redact_emails" => cfg.support.redact_emails = parse_bool(&value)?,
                 "support.redact_tokens" => cfg.support.redact_tokens = parse_bool(&value)?,
-                "experiments.multi_login" => cfg.experiments.multi_login = parse_bool(&value)?,
-                "experiments.fleet" => cfg.experiments.fleet = parse_bool(&value)?,
-                "experiments.mcp_server" => cfg.experiments.mcp_server = parse_bool(&value)?,
-                "experiments.ai_plan_runner" => {
-                    cfg.experiments.ai_plan_runner = parse_bool(&value)?;
-                }
-                "experiments.slurp_automation" => {
-                    cfg.experiments.slurp_automation = parse_bool(&value)?;
-                }
-                "experiments.background_live_checks" => {
-                    cfg.experiments.background_live_checks = parse_bool(&value)?;
-                }
                 "dev.enabled" => cfg.dev.enabled = parse_bool(&value)?,
                 _ => {
                     return Err(ColabError::config(
-                        "supported settings keys include ui.theme, ui.color, ui.animations, ui.tui, ui.bell, ui.fun, ui.icons, output.json, skills.enabled, support.redact_tokens, experiments.fleet, experiments.mcp_server, experiments.ai_plan_runner, and dev.enabled",
+                        "supported settings keys include ui.theme, ui.color, ui.animations, ui.tui, ui.bell, ui.fun, ui.icons, output.json, skills.enabled, support.redact_tokens, experiments.distribute, experiments.continue, experiments.mcp_server, experiments.ai_plan_runner, experiments.ast_observer, and dev.enabled",
                     ));
                 }
             }
@@ -3411,19 +3964,48 @@ fn print_fleet_plan(
             }),
         );
     }
-    println!("fleet\t{}", plan.name);
-    println!("runtimes\t{}", plan.requested_runtimes);
-    println!("shards\t{}", plan.shard_count);
-    println!("parallel\t{}", plan.max_parallel_tasks);
-    println!("budget\t{}", plan.budget_limit);
-    println!("stop\t{}", plan.stop_condition);
-    for finding in findings {
-        println!(
-            "{:?}\t{}\tnext: {}",
-            finding.level, finding.message, finding.next_action
+    println!(
+        "{}",
+        heading("Distribute plan", Ui::new(false, false, false))
+    );
+    let rows = vec![
+        vec!["name".to_string(), plan.name.clone()],
+        vec!["runtimes".to_string(), plan.requested_runtimes.to_string()],
+        vec!["shards".to_string(), plan.shard_count.to_string()],
+        vec!["parallel".to_string(), plan.max_parallel_tasks.to_string()],
+        vec!["budget".to_string(), plan.budget_limit.to_string()],
+        vec!["stop".to_string(), plan.stop_condition.clone()],
+        vec!["fast path".to_string(), plan.fast_path.to_string()],
+    ];
+    print!(
+        "{}",
+        crate::cocli::ui::table::render_table(
+            &["Field", "Value"],
+            &rows,
+            crate::cocli::ui::width::terminal_width()
+        )
+    );
+    if !findings.is_empty() {
+        println!();
+        let finding_rows: Vec<Vec<String>> = findings
+            .iter()
+            .map(|finding| {
+                vec![
+                    format!("{:?}", finding.level),
+                    finding.message.clone(),
+                    finding.next_action.clone(),
+                ]
+            })
+            .collect();
+        print!(
+            "{}",
+            crate::cocli::ui::table::render_table(
+                &["Level", "Message", "Fix"],
+                &finding_rows,
+                crate::cocli::ui::width::terminal_width()
+            )
         );
     }
-    println!("fast path\t{}", plan.fast_path);
     Ok(())
 }
 

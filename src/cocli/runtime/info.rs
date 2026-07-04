@@ -111,7 +111,7 @@ pub fn migration_hint(old_command: &[&str]) -> Option<MigrationHint> {
         "ls" => "colab-cli fs ls",
         "rm" => "colab-cli fs rm",
         "drivemount" => "colab-cli fs drive mount",
-        "install" => "colab-cli run install",
+        "install" => "colab-cli run pip install",
         _ => return None,
     };
     Some(MigrationHint {

@@ -1,3 +1,12 @@
+pub mod color;
+pub mod error;
+pub mod palette;
+pub mod panel;
+pub mod progress;
+pub mod prompt;
+pub mod table;
+pub mod width;
+
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use tabled::settings::Style;

@@ -10,6 +10,9 @@ fn parses_major_command_spaces() {
         ["colab-cli", "run", "last", "--confirm"].as_slice(),
         ["colab-cli", "run", "py", "--code", "print(1)"].as_slice(),
         ["colab-cli", "run", "notebook", "report.ipynb"].as_slice(),
+        ["colab-cli", "run", "pip", "install", "torch"].as_slice(),
+        ["colab-cli", "run", "pip", "freeze"].as_slice(),
+        ["colab-cli", "run", "pip", "restore", "requirements.txt"].as_slice(),
         ["colab-cli", "run", "install", "torch"].as_slice(),
         ["colab-cli", "fs", "changed", ".", "/content"].as_slice(),
         ["colab-cli", "fs", "drive", "mount"].as_slice(),
@@ -21,10 +24,14 @@ fn parses_major_command_spaces() {
         ["colab-cli", "status", "runtime", "--versions"].as_slice(),
         ["colab-cli", "status", "runtime", "--backend"].as_slice(),
         ["colab-cli", "status", "check"].as_slice(),
+        ["colab-cli", "distribute", "plan"].as_slice(),
+        ["colab-cli", "distribute", "recipe", "explain"].as_slice(),
+        ["colab-cli", "distribute", "pool", "plan"].as_slice(),
+        ["colab-cli", "distribute", "shard", "plan"].as_slice(),
         ["colab-cli", "slurp", "explain"].as_slice(),
         ["colab-cli", "fleet", "plan"].as_slice(),
         ["colab-cli", "settings", "skills", "list"].as_slice(),
-        ["colab-cli", "settings", "skills", "inspect", "slurp.plan"].as_slice(),
+        ["colab-cli", "settings", "skills", "inspect", "recipe.plan"].as_slice(),
         ["colab-cli", "settings", "skills", "mcp"].as_slice(),
         ["colab-cli", "settings", "ui", "get"].as_slice(),
         ["colab-cli", "settings", "ui", "set", "animations", "false"].as_slice(),
@@ -36,7 +43,7 @@ fn parses_major_command_spaces() {
             "settings",
             "experiments",
             "set",
-            "fleet",
+            "distribute",
             "true",
         ]
         .as_slice(),
@@ -45,7 +52,9 @@ fn parses_major_command_spaces() {
         ["colab-cli", "ai"].as_slice(),
         ["colab-cli", "ai", "tools"].as_slice(),
         ["colab-cli", "ai", "tools", "list"].as_slice(),
-        ["colab-cli", "ai", "tools", "inspect", "slurp.plan"].as_slice(),
+        ["colab-cli", "ai", "tools", "inspect", "recipe.plan"].as_slice(),
+        ["colab-cli", "ai", "ast", "file.py"].as_slice(),
+        ["colab-cli", "ai", "ast", "watch", "file.py"].as_slice(),
         ["colab-cli", "ai", "mcp"].as_slice(),
         ["colab-cli", "ai", "mcp", "serve", "--stdio"].as_slice(),
         ["colab-cli", "ai", "plan", "train a model"].as_slice(),
@@ -68,9 +77,6 @@ fn top_level_help_has_final_command_spaces() {
         "run",
         "fs",
         "status",
-        "continue",
-        "slurp",
-        "fleet",
         "ai",
         "auth",
         "settings",
@@ -79,10 +85,24 @@ fn top_level_help_has_final_command_spaces() {
         assert!(stdout.contains(name), "{name}");
     }
     for old in [
-        "exec", "env", "mount", "runtime", "tools", "config", "doctor", "release", "agent",
+        "continue",
+        "distribute",
+        "slurp",
+        "fleet",
+        "exec",
+        "env",
+        "mount",
+        "runtime",
+        "tools",
+        "config",
+        "doctor",
+        "release",
+        "agent",
     ] {
         assert!(!stdout.contains(&format!("  {old}")), "{old}");
     }
+    assert!(!stdout.contains("--color"));
+    assert!(stdout.contains("--no-color"));
 }
 
 #[test]
@@ -128,7 +148,7 @@ fn no_command_shows_launcher_fallback_in_non_tty() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("Google Colab from the terminal"));
-    assert!(stdout.contains("run: colab-cli --help"));
+    assert!(stdout.contains("Usage: colab-cli [OPTIONS] <COMMAND>"));
     assert!(!stdout.contains("Quick actions"));
     assert!(!stdout.contains("command preview"));
 }
@@ -176,15 +196,21 @@ fn config_open_prints_path_without_editor() {
 
 #[test]
 fn settings_skills_list_is_catalog_not_debug_rows() {
-    let out = bin().args(["settings", "skills", "list"]).output().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .args(["settings", "skills", "list"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("Tool"));
-    assert!(stdout.contains("slurp.plan"));
-    assert!(stdout.contains("slurp.explain"));
-    assert!(stdout.contains("fleet.plan"));
+    assert!(stdout.contains("recipe.plan"));
+    assert!(stdout.contains("recipe.explain"));
+    assert!(stdout.contains("distribute.plan"));
     assert!(stdout.contains("mcp.tools"));
     assert!(stdout.contains("agent.audit"));
+    assert!(!stdout.contains("continue.resume"));
     assert!(!stdout.contains("session.new"));
     assert!(!stdout.contains("run.python"));
     assert!(!stdout.contains("fs.push"));
@@ -196,7 +222,9 @@ fn settings_skills_list_is_catalog_not_debug_rows() {
 
 #[test]
 fn settings_skills_json_has_stable_fields() {
+    let home = tempfile::tempdir().unwrap();
     let out = bin()
+        .env("HOME", home.path())
         .args(["--json", "settings", "skills", "list"])
         .output()
         .unwrap();
@@ -243,10 +271,11 @@ fn settings_experiments_default_off_and_persist() {
     assert!(list.status.success());
     let stdout = String::from_utf8(list.stdout).unwrap();
     assert!(stdout.contains("[ ] Multi-login"));
-    assert!(stdout.contains("[ ] Fleet/distributed planning"));
+    assert!(stdout.contains("[ ] Continue"));
+    assert!(stdout.contains("[ ] Distribute"));
     assert!(stdout.contains("[ ] MCP server"));
     assert!(stdout.contains("[ ] AI plan runner"));
-    assert!(stdout.contains("[ ] Slurp automation"));
+    assert!(stdout.contains("[ ] AST observer"));
     assert!(!stdout.contains("Quick Actions"));
 
     let set = bin()
@@ -263,6 +292,28 @@ fn settings_experiments_default_off_and_persist() {
         .unwrap();
     assert!(get.status.success());
     assert_eq!(String::from_utf8(get.stdout).unwrap().trim(), "true");
+
+    let blocked = bin()
+        .env("HOME", home.path())
+        .args(["settings", "experiments", "set", "multi-login", "true"])
+        .output()
+        .unwrap();
+    assert!(!blocked.status.success());
+    let stderr = String::from_utf8(blocked.stderr).unwrap();
+    assert!(stderr.contains("multi-login requires distribute"));
+
+    let distribute = bin()
+        .env("HOME", home.path())
+        .args(["settings", "experiments", "set", "distribute", "true"])
+        .output()
+        .unwrap();
+    assert!(distribute.status.success());
+    let multi = bin()
+        .env("HOME", home.path())
+        .args(["settings", "experiments", "set", "multi-login", "true"])
+        .output()
+        .unwrap();
+    assert!(multi.status.success());
 }
 
 #[test]
@@ -287,13 +338,21 @@ fn settings_ui_set_persists_in_temp_config() {
 
 #[test]
 fn ai_tools_list_is_agent_catalog() {
-    let out = bin().args(["ai", "tools", "list"]).output().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .args(["ai", "tools", "list"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("AI tools"));
     assert!(stdout.contains("Agent-friendly workflows"));
-    assert!(stdout.contains("slurp.plan"));
+    assert!(stdout.contains("recipe.plan"));
+    assert!(stdout.contains("distribute.plan"));
+    assert!(stdout.contains("ast.outline"));
     assert!(stdout.contains("mcp.tools"));
+    assert!(!stdout.contains("continue.resume"));
     assert!(!stdout.contains("session.new"));
     assert!(!stdout.contains("session=false"));
     assert!(!stdout.contains("Quick Actions"));
@@ -301,7 +360,9 @@ fn ai_tools_list_is_agent_catalog() {
 
 #[test]
 fn ai_tools_json_is_clean() {
+    let home = tempfile::tempdir().unwrap();
     let out = bin()
+        .env("HOME", home.path())
         .args(["--json", "ai", "tools", "list"])
         .output()
         .unwrap();
@@ -314,8 +375,93 @@ fn ai_tools_json_is_clean() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["name"] == "slurp.plan")
+            .any(|row| row["name"] == "recipe.plan")
     );
+}
+
+#[test]
+fn optional_commands_are_experiment_gated() {
+    let home = tempfile::tempdir().unwrap();
+    for args in [
+        ["distribute", "plan"].as_slice(),
+        ["continue", "last"].as_slice(),
+        ["ai", "ast", "Cargo.toml"].as_slice(),
+    ] {
+        let out = bin().env("HOME", home.path()).args(args).output().unwrap();
+        assert!(!out.status.success(), "{args:?}");
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(stderr.contains("experimental feature disabled"), "{stderr}");
+    }
+}
+
+#[test]
+fn enabled_distribute_status_and_ast_outline_work() {
+    let home = tempfile::tempdir().unwrap();
+    let sample = home.path().join("sample.py");
+    std::fs::write(
+        &sample,
+        "import os\nfrom pathlib import Path\n\nclass Job:\n    pass\n\ndef main():\n    return Path('.')\n\nif __name__ == '__main__':\n    main()\n",
+    )
+    .unwrap();
+
+    assert!(
+        bin()
+            .env("HOME", home.path())
+            .args(["settings", "experiments", "set", "distribute", "true"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let distribute = bin()
+        .env("HOME", home.path())
+        .args(["distribute", "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(distribute.status.success());
+    let distribute_json: serde_json::Value = serde_json::from_slice(&distribute.stdout).unwrap();
+    assert_eq!(distribute_json["enabled"], true);
+
+    assert!(
+        bin()
+            .env("HOME", home.path())
+            .args(["settings", "experiments", "set", "ast-observer", "true"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let ast = bin()
+        .env("HOME", home.path())
+        .args(["ai", "ast", sample.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(ast.status.success());
+    let stdout = String::from_utf8(ast.stdout).unwrap();
+    assert!(!stdout.contains("\x1b["));
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(
+        value["imports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "os")
+    );
+    assert!(
+        value["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "main")
+    );
+    assert!(
+        value["classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "Job")
+    );
+    assert_eq!(value["main_guard"], true);
 }
 
 #[test]

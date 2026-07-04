@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
     version,
     disable_help_subcommand = true,
     override_usage = "colab-cli [OPTIONS] <COMMAND>",
-    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  continue     Checkpoint and resume work\n  slurp        Tiny TOML workflows\n  fleet        Compliant runtime planning\n  ai           Agent, MCP, and tool workflows\n  auth         Google account profiles\n  settings     Config, experiments, support, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --color <auto|always|never>\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
+    help_template = "Google Colab from the terminal\n\nUsage: colab-cli [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code and prepare runtimes\n  fs           Files, sync, and Drive\n  status       State, health, and runtime info\n  ai           Agent, MCP, and code tools\n  auth         Google account profiles\n  settings     Config, experiments, support, and UI\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n      --verbose\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
 )]
 pub struct Cli {
     #[arg(long, short, global = true, env = "COLAB_QUIET")]
@@ -19,7 +19,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub verbose: bool,
 
-    #[arg(long, global = true, default_value = "auto", value_name = "auto|always|never", value_parser = ["auto", "always", "never"])]
+    #[arg(long, global = true, default_value = "auto", value_name = "auto|always|never", value_parser = ["auto", "always", "never"], hide = true)]
     pub color: String,
 
     #[arg(long, global = true)]
@@ -69,24 +69,30 @@ pub enum Commands {
     },
     /// Checkpoint and resume work
     #[command(name = "continue")]
-    #[command(display_order = 50)]
+    #[command(display_order = 50, hide = true)]
     Continue {
         #[command(subcommand)]
         command: ContinueCommands,
     },
+    /// Experimental workflow distribution
+    #[command(display_order = 55, hide = true)]
+    Distribute {
+        #[command(subcommand)]
+        command: Option<DistributeCommands>,
+    },
     /// Tiny TOML workflows
-    #[command(display_order = 60)]
+    #[command(display_order = 60, hide = true)]
     Slurp {
         #[command(subcommand)]
         command: SlurpCommands,
     },
     /// Compliant runtime planning
-    #[command(display_order = 70)]
+    #[command(display_order = 70, hide = true)]
     Fleet {
         #[command(subcommand)]
         command: FleetCommands,
     },
-    /// Agent, MCP, and tool workflows
+    /// Agent, MCP, and code tools
     #[command(display_order = 75)]
     Ai {
         #[command(subcommand)]
@@ -309,6 +315,8 @@ pub enum RunCommands {
         script: String,
         #[arg(long, short = 's')]
         session: Option<String>,
+        #[arg(long)]
+        ast: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -327,6 +335,8 @@ pub enum RunCommands {
         session: Option<String>,
         #[arg(long)]
         out: Option<String>,
+        #[arg(long)]
+        ast: bool,
     },
     /// Start a Python REPL
     Repl {
@@ -338,7 +348,13 @@ pub enum RunCommands {
         #[arg(long, short = 's')]
         session: Option<String>,
     },
-    /// Install packages or a requirements file
+    /// Manage Python packages on the runtime
+    Pip {
+        #[command(subcommand)]
+        command: PipCommands,
+    },
+    /// Compatibility: moved to `run pip install`.
+    #[command(hide = true)]
     Install {
         packages: Vec<String>,
         #[arg(short = 'r', long = "requirements")]
@@ -346,12 +362,14 @@ pub enum RunCommands {
         #[arg(long, short = 's')]
         session: Option<String>,
     },
-    /// Freeze installed packages
+    /// Compatibility: moved to `run pip freeze`.
+    #[command(hide = true)]
     Freeze {
         #[arg(long, short = 's')]
         session: Option<String>,
     },
-    /// Restore packages from requirements.txt
+    /// Compatibility: moved to `run pip restore`.
+    #[command(hide = true)]
     Restore {
         requirements: String,
         #[arg(long, short = 's')]
@@ -364,6 +382,42 @@ pub enum RunCommands {
     },
     /// Show recent local run commands
     History,
+}
+
+#[derive(Subcommand)]
+pub enum PipCommands {
+    Install {
+        packages: Vec<String>,
+        #[arg(short = 'r', long = "requirements")]
+        requirements: Option<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Freeze {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Restore {
+        requirements: String,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Check {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    List {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Tree {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Cache {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -620,12 +674,14 @@ pub enum StatusCommands {
     Fs,
     /// Show Drive state
     Drive,
-    /// Show Slurp config state
+    /// Compatibility: recipe status moved to `distribute status`.
+    #[command(hide = true)]
     Slurp {
         #[arg(long, default_value = "slurp.toml")]
         config: String,
     },
-    /// Show fleet planning state
+    /// Compatibility: pool status moved to `distribute status`.
+    #[command(hide = true)]
     Fleet {
         #[arg(long, default_value = "slurp.toml")]
         config: String,
@@ -833,6 +889,30 @@ pub enum AiCommands {
         #[arg(long)]
         confirm: bool,
     },
+    Ast {
+        first: String,
+        second: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Code {
+        #[command(subcommand)]
+        command: AiCodeCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum AiCodeCommands {
+    Explain {
+        file: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Deps {
+        file: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -896,6 +976,74 @@ pub enum SlurpCommands {
 }
 
 #[derive(Subcommand)]
+pub enum DistributeCommands {
+    Plan(FleetConfigArgs),
+    Status {
+        #[arg(long, default_value = "cocli.recipe.toml")]
+        config: String,
+    },
+    Explain(FleetConfigArgs),
+    Run(DistributeRunArgs),
+    Resume(FleetConfigArgs),
+    Clean,
+    Recipe {
+        #[command(subcommand)]
+        command: DistributeRecipeCommands,
+    },
+    Pool {
+        #[command(subcommand)]
+        command: DistributePoolCommands,
+    },
+    Shard {
+        #[command(subcommand)]
+        command: DistributeShardCommands,
+    },
+}
+
+#[derive(clap::Args, Clone)]
+pub struct DistributeRunArgs {
+    #[arg(long, default_value = "cocli.recipe.toml")]
+    pub config: String,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub confirm: bool,
+    #[arg(long)]
+    pub cost: bool,
+    #[arg(long)]
+    pub allow_fallback_account: bool,
+}
+
+#[derive(Subcommand)]
+pub enum DistributeRecipeCommands {
+    Init {
+        #[arg(long, default_value = "cocli.recipe.toml")]
+        out: String,
+    },
+    Check(FleetConfigArgs),
+    Explain(FleetConfigArgs),
+    Run(DistributeRunArgs),
+}
+
+#[derive(Subcommand)]
+pub enum DistributePoolCommands {
+    Plan(FleetConfigArgs),
+    Status {
+        #[arg(long, default_value = "cocli.recipe.toml")]
+        config: String,
+    },
+    Cost(FleetConfigArgs),
+    Logs,
+}
+
+#[derive(Subcommand)]
+pub enum DistributeShardCommands {
+    Plan(FleetConfigArgs),
+    Run(DistributeRunArgs),
+    Resume(FleetConfigArgs),
+}
+
+#[derive(Subcommand)]
 pub enum ReleaseCommands {
     Name {
         version: Option<String>,
@@ -915,9 +1063,9 @@ pub enum ReleaseCommands {
 pub enum ContinueCommands {
     Save {
         #[arg(long, short = 's')]
-        session: String,
+        session: Option<String>,
         #[arg(long)]
-        name: String,
+        name: Option<String>,
         #[arg(long = "artifact")]
         artifacts: Vec<String>,
     },
@@ -931,6 +1079,8 @@ pub enum ContinueCommands {
         replay_all: bool,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        confirm: bool,
     },
     Last,
     Export {
@@ -1171,6 +1321,7 @@ mod tests {
                 RunCommands::Script {
                     script,
                     session,
+                    ast: _,
                     args,
                 },
         }) = cli.command
@@ -1190,6 +1341,7 @@ mod tests {
 
     #[test]
     fn new_followup_spaces_parse() {
+        assert!(Cli::try_parse_from(["colab-cli", "run", "pip", "install", "torch"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "run", "install", "torch"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "status", "runtime", "--gpu"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "fs", "drive", "mount"]).is_ok());
@@ -1207,7 +1359,7 @@ mod tests {
         );
         assert!(Cli::try_parse_from(["colab-cli", "session", "new", "--no-retry"]).is_ok());
         assert!(
-            Cli::try_parse_from(["colab-cli", "settings", "skills", "inspect", "slurp.plan"])
+            Cli::try_parse_from(["colab-cli", "settings", "skills", "inspect", "recipe.plan"])
                 .is_ok()
         );
         assert!(Cli::try_parse_from(["colab-cli", "settings", "experiments"]).is_ok());
@@ -1218,19 +1370,24 @@ mod tests {
                 "settings",
                 "experiments",
                 "set",
-                "fleet",
+                "distribute",
                 "true"
             ])
             .is_ok()
         );
         assert!(Cli::try_parse_from(["colab-cli", "settings", "experiments", "reset"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "distribute", "plan"]).is_ok());
         assert!(
             Cli::try_parse_from(["colab-cli", "fleet", "plan", "--config", "slurp.toml"]).is_ok()
         );
         assert!(Cli::try_parse_from(["colab-cli", "slurp", "explain"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "ai"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "ai", "tools", "list"]).is_ok());
-        assert!(Cli::try_parse_from(["colab-cli", "ai", "tools", "inspect", "slurp.plan"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["colab-cli", "ai", "tools", "inspect", "recipe.plan"]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "ast", "file.py"]).is_ok());
+        assert!(Cli::try_parse_from(["colab-cli", "ai", "ast", "watch", "file.py"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "ai", "mcp"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "ai", "mcp", "serve", "--stdio"]).is_ok());
         assert!(Cli::try_parse_from(["colab-cli", "ai", "plan", "train"]).is_ok());

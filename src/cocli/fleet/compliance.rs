@@ -28,8 +28,8 @@ pub fn validate_slurp(cfg: &SlurpConfig) -> Vec<ComplianceFinding> {
 
     if total_runtimes > 1 && unknown_or_free > 0 {
         out.push(refuse(
-            "Nope: this looks like account rotation to dodge limits",
-            "Use paid, enterprise, marketplace, or local runtimes for fleet jobs",
+            "blocked: this looks like account rotation to dodge limits",
+            "use paid, enterprise, marketplace, or local runtimes for distribute jobs",
         ));
     }
 
@@ -73,15 +73,15 @@ pub fn validate_slurp(cfg: &SlurpConfig) -> Vec<ComplianceFinding> {
     ] {
         if visible.contains(pattern) {
             out.push(refuse(
-                "nope ▸ that smells like quota dodging or abuse",
-                "remove that workload from the Slurp plan",
+                "blocked: workload pattern is not appropriate for managed runtimes",
+                "remove that workload from the recipe",
             ));
         }
     }
 
     if cfg.checkpoint.every.is_none() && cfg.budget.max_runtime_minutes > 60 {
         out.push(warn(
-            "long fleet job has no checkpoint cadence",
+            "long distribute job has no checkpoint cadence",
             "set [checkpoint].every = \"shard\"",
         ));
     }
@@ -106,8 +106,8 @@ pub fn validate_slurp(cfg: &SlurpConfig) -> Vec<ComplianceFinding> {
     if out.is_empty() {
         out.push(ComplianceFinding {
             level: ComplianceLevel::Ok,
-            message: "Slurp can plan this, but it will not bypass Colab rules".into(),
-            next_action: "run fleet plan before start".into(),
+            message: "recipe can be planned without bypassing Colab rules".into(),
+            next_action: "run distribute plan before start".into(),
         });
     }
     out

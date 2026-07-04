@@ -136,6 +136,10 @@ pub struct DevConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ExperimentsConfig {
     #[serde(default)]
+    pub continue_work: bool,
+    #[serde(default)]
+    pub distribute: bool,
+    #[serde(default)]
     pub multi_login: bool,
     #[serde(default)]
     pub fleet: bool,
@@ -143,6 +147,8 @@ pub struct ExperimentsConfig {
     pub mcp_server: bool,
     #[serde(default)]
     pub ai_plan_runner: bool,
+    #[serde(default)]
+    pub ast_observer: bool,
     #[serde(default)]
     pub slurp_automation: bool,
     #[serde(default)]
