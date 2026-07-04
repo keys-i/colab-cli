@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-cocli is a Rust-first Colab CLI.
+colab is a Rust-first Colab CLI.
 
 It should make normal Colab work less annoying:
 

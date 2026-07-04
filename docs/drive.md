@@ -26,7 +26,7 @@ colab fs drive path --session trainer
 9. wait for browser approval if needed
 10. verify `/content/drive`
 
-If the endpoint is unreachable, cocli stops before kernel checks:
+If the endpoint is unreachable, colab stops before kernel checks:
 
 ```text
 Drive mount failed
@@ -49,7 +49,7 @@ Use `-v`, `-vv`, or `-vvv` to debug Drive mount stages. Verbose output goes to s
 
 `google.colab.drive.mount()` only works inside a Colab/IPython kernel. It is not safe to run it through a plain remote `python -c` process.
 
-cocli now runs Drive mount through the kernel execution path. Before mounting it checks that the attached session has a kernel:
+colab now runs Drive mount through the kernel execution path. Before mounting it checks that the attached session has a kernel:
 
 ```python
 import IPython
@@ -78,11 +78,16 @@ Drive auth can require browser approval. Use:
 colab fs drive mount --session trainer --open
 ```
 
-The default mount timeout is 600 seconds because Drive approval can involve a browser step. Endpoint preflight stays short at 10 seconds. If approval is still pending at the timeout, cocli exits with a next action instead of dumping a Python traceback.
+The default mount timeout is 600 seconds because Drive approval can involve a browser step. Endpoint preflight stays short at 10 seconds. If approval is still pending at the timeout, colab exits with a next action instead of dumping a Python traceback.
+
+The current Rust implementation runs `drive.mount()` through the selected
+kernel and handles known failures cleanly. It does not yet claim full
+google-colab-cli-style Drive credential propagation until the
+`colab_request`/`credentials-propagation` hook has passed live smoke testing.
 
 ## Enterprise And Unsupported Runtimes
 
-Some Colab Enterprise setups do not support `google.colab.drive.mount()`. cocli reports that as a normal Drive error:
+Some Colab Enterprise setups do not support `google.colab.drive.mount()`. colab reports that as a normal Drive error:
 
 ```text
 Drive mount is not supported for this runtime

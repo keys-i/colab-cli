@@ -7,17 +7,17 @@ use colored::Colorize;
 
 use crate::cocli::auth;
 use crate::cocli::cli::{
-    AgentCommands, AiCodeCommands, AiCommands, AiMcpCommands, AiToolsCommands, AuthCommands,
-    AuthProfileArgs, Cli, Commands, CompatTransferArgs, ConfigCommands, ContinueCommands,
-    DistributeCommands, DistributePoolCommands, DistributeRecipeCommands, DistributeRunArgs,
-    DistributeShardCommands, EnvCommands, ExecCommands, FileCommands, FleetCommands,
-    FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, JuliaCommands,
-    JuliaPkgCommands, KernelActionArgs, KernelSessionArg, LogCommands, MountCommands, PipCommands,
-    PkgCommands, RCommands, RPkgCommands, RenvCommands, RunCommands, RuntimeCommands,
-    SecretCommands, ServerCommands, SessionCommands, SessionKernelCommands, SessionLogsArgs,
-    SessionNameArg, SessionNewArgs, SettingsBillingCommands, SettingsCommands,
-    SettingsExperimentsCommands, SettingsUiCommands, SettingsUpdateCommands, SkillCommands,
-    SlurpCommands, StatusCommands, SupportCommands, ToolsCommands,
+    AiCodeCommands, AiCommands, AiMcpCommands, AiToolsCommands, AuthCommands, AuthProfileArgs, Cli,
+    Commands, CompatTransferArgs, ConfigCommands, ContinueCommands, DistributeCommands,
+    DistributePoolCommands, DistributeRecipeCommands, DistributeRunArgs, DistributeShardCommands,
+    EnvCommands, ExecCommands, FileCommands, FleetCommands, FleetConfigArgs, FsCommands,
+    FsDiffArgs, FsDriveCommands, FsSyncArgs, JuliaCommands, JuliaPkgCommands, KernelActionArgs,
+    KernelSessionArg, LogCommands, MountCommands, PipCommands, PkgCommands, RCommands,
+    RPkgCommands, RenvCommands, RunCommands, RuntimeCommands, SecretCommands, ServerCommands,
+    SessionCommands, SessionKernelCommands, SessionLogsArgs, SessionNameArg, SessionNewArgs,
+    SettingsBillingCommands, SettingsCommands, SettingsExperimentsCommands, SettingsUiCommands,
+    SettingsUpdateCommands, SkillCommands, SlurpCommands, StatusCommands, SupportCommands,
+    ToolsCommands,
 };
 #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 use crate::cocli::cli::{DevCommands, ReleaseCommands};
@@ -341,9 +341,9 @@ fn api_fix(status: u16, url: &str) -> Option<&'static str> {
 }
 
 fn trim_raw(body: &str) -> String {
-    let body = body.replace("<redacted>", "__COCLI_REDACTED__");
+    let body = body.replace("<redacted>", "__COLAB_CLI_REDACTED__");
     let clean = strip_html(&body)
-        .replace("__COCLI_REDACTED__", "<redacted>")
+        .replace("__COLAB_CLI_REDACTED__", "<redacted>")
         .replace('\n', " ");
     let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
     if clean.len() > 600 {
@@ -380,6 +380,7 @@ fn interaction_allowed(cli: &Cli, stdout_tty: bool, stdin_tty: bool, ci: bool) -
         || ci
         || !stdout_tty
         || !stdin_tty
+        || std::env::var_os("COLAB_CLI_NO_INTERACTIVE").is_some()
         || std::env::var_os("COLAB_NO_INTERACTIVE").is_some()
     {
         return false;
@@ -716,7 +717,8 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         }
         Some(Commands::Agent { command }) => {
             migration(&ui, "colab ai ...");
-            handle_agent(command, ui, json)
+            let _ = command;
+            Err(ColabError::config("old agent command is disabled"))
         }
         Some(Commands::Continue { command }) => {
             require_experiment("continue", |cfg| cfg.experiments.continue_work)?;
@@ -843,21 +845,32 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
                 let profile = store
                     .get(&name)
                     .ok_or_else(|| ColabError::config(format!("auth profile not found: {name}")))?;
-                print_value(json, &redacted_profile(profile, show_private))
+                let profile = redacted_profile(profile, show_private);
+                if json {
+                    print_value(true, &profile)
+                } else {
+                    print_auth_profile_status(&profile);
+                    Ok(())
+                }
             } else {
                 let current = auth::current_account()?.map(|account| {
                     crate::cocli::auth::redaction::redacted_email(&account.email, show_private)
                 });
                 let adc_path = adc_credentials_path();
-                print_value(
-                    json,
-                    &serde_json::json!({
-                        "signed_in": current.is_some(),
-                        "account": current,
-                        "adc_available": adc_path.as_ref().is_some_and(|p| p.exists()),
-                        "adc_path": adc_path.map(|p| p.display().to_string()),
-                    }),
-                )
+                let adc_available = adc_path.as_ref().is_some_and(|p| p.exists());
+                let adc_path = adc_path.map(|p| p.display().to_string());
+                let data = serde_json::json!({
+                    "signed_in": current.is_some(),
+                    "account": current,
+                    "adc_available": adc_available,
+                    "adc_path": adc_path,
+                });
+                if json {
+                    print_value(true, &data)
+                } else {
+                    print_auth_status(data);
+                    Ok(())
+                }
             }
         }
         AuthCommands::Use {
@@ -1102,7 +1115,7 @@ async fn handle_session_repair(
     validate_runtime_endpoint(server)?;
     match tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        manager.client().list_sessions_via_tunnel(&server.endpoint),
+        list_runtime_sessions(manager.client(), server),
     )
     .await
     {
@@ -1156,7 +1169,7 @@ async fn handle_session_logs(config: &ColabConfig, ui: Ui, args: SessionLogsArgs
             "nbformat": 4,
             "nbformat_minor": 5,
             "cells": [],
-            "metadata": { "colab_cli": data }
+            "metadata": { "colab": data }
         })
         .to_string(),
         _ => format!(
@@ -1563,10 +1576,7 @@ async fn load_kernel_views(
         .list_kernelspecs(&server.proxy_url, &server.proxy_token)
         .await
         .ok();
-    let mut sessions = manager
-        .client()
-        .list_sessions_via_tunnel(&server.endpoint)
-        .await?;
+    let mut sessions = list_runtime_sessions(manager.client(), server).await?;
     let api_kernels = manager
         .client()
         .list_kernels(&server.proxy_url, &server.proxy_token)
@@ -1597,6 +1607,25 @@ async fn load_kernel_views(
         }
     }
     Ok(views)
+}
+
+async fn list_runtime_sessions(
+    client: &ColabClient,
+    server: &StoredServer,
+) -> Result<Vec<Session>> {
+    match client
+        .list_sessions(&server.proxy_url, &server.proxy_token)
+        .await
+    {
+        Ok(sessions) => Ok(sessions),
+        Err(proxy_error) => {
+            debug::debug1("runtime sessions proxy path failed; trying tunnel path");
+            client
+                .list_sessions_via_tunnel(&server.endpoint)
+                .await
+                .map_err(|_| proxy_error)
+        }
+    }
 }
 
 fn session_for_kernel(kernel: JupyterKernel) -> Session {
@@ -2432,10 +2461,7 @@ async fn active_kernel_session(
     manager: &ServerManager,
     server: &StoredServer,
 ) -> Result<(KernelView, Session)> {
-    let mut sessions = manager
-        .client()
-        .list_sessions_via_tunnel(&server.endpoint)
-        .await?;
+    let mut sessions = list_runtime_sessions(manager.client(), server).await?;
     if sessions.is_empty() {
         let kernels = manager
             .client()
@@ -2592,7 +2618,7 @@ fn apply_python_script_bridge(command: Vec<String>, secrets: &SecretBundle) -> R
     let argv_json = serde_json::to_string(&command[1..])?;
     let script_json = serde_json::to_string(&script)?;
     let wrapper = format!(
-        "{}\nimport runpy as _cocli_runpy, sys as _cocli_sys\n_cocli_sys.argv = {argv_json}\n_cocli_runpy.run_path({script_json}, run_name='__main__')",
+        "{}\nimport runpy as _colab_cli_runpy, sys as _colab_cli_sys\n_colab_cli_sys.argv = {argv_json}\n_colab_cli_runpy.run_path({script_json}, run_name='__main__')",
         secrets.python_prelude()
     );
     Ok(vec!["python".into(), "-c".into(), wrapper])
@@ -2612,7 +2638,7 @@ async fn handle_repl(
     debug::debug1("run.repl stage=check_jupyter_sessions attempt=1/1");
     let sessions = match tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        manager.client().list_sessions_via_tunnel(&server.endpoint),
+        list_runtime_sessions(manager.client(), &server),
     )
     .await
     {
@@ -3345,8 +3371,7 @@ async fn drive_jupyter_sessions_with_retry(
             &format!("checking Jupyter sessions attempt {attempt}/{attempts}"),
         );
         let started = std::time::Instant::now();
-        match tokio::time::timeout(timeout, client.list_sessions_via_tunnel(&server.endpoint)).await
-        {
+        match tokio::time::timeout(timeout, list_runtime_sessions(client, server)).await {
             Ok(Ok(sessions)) => {
                 debug::debug1(format!(
                     "drive.mount stage=check_jupyter_sessions ok elapsed={:.3}s sessions={}",
@@ -4140,7 +4165,7 @@ async fn handle_status(
         }
         Some(StatusCommands::Check) => {
             let mut report = build_status_report(config)?;
-            report.title = "cocli check".to_string();
+            report.title = "colab check".to_string();
             render_status_report(&report, json, ui)
         }
         Some(StatusCommands::Run) => print_value_or_kv(
@@ -4207,7 +4232,7 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
     let files_ready = cache_writable(&config.data_dir);
 
     let cfg = load_cocli_config().unwrap_or_default();
-    let recipe_exists = Path::new("cocli.recipe.toml").exists() || Path::new("slurp.toml").exists();
+    let recipe_exists = Path::new("colab.recipe.toml").exists() || Path::new("slurp.toml").exists();
     let fix = if account.is_none() {
         Some("run colab auth login".to_string())
     } else if !has_session {
@@ -4219,7 +4244,7 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
     };
 
     Ok(StatusReport {
-        title: "cocli status".to_string(),
+        title: "colab status".to_string(),
         sections: vec![
             StatusLine {
                 name: "Auth",
@@ -4706,7 +4731,8 @@ fn run_settings_editor(
             terminal::Clear(ClearType::All)
         )
         .map_err(|e| ColabError::config(format!("terminal render: {e}")))?;
-        print_settings_editor(&state, ui)?;
+        let text = settings_editor_text(&state, ui, crate::cocli::ui::width::terminal_width());
+        stdout.write_all(text.replace('\n', "\r\n").as_bytes())?;
         stdout.flush()?;
 
         let Event::Key(KeyEvent { code, .. }) =
@@ -4972,27 +4998,45 @@ fn confirm_discard() -> Result<bool> {
     }
 }
 
-fn print_settings_editor(state: &SettingsEditorState, ui: Ui) -> Result<()> {
-    println!(
-        "{}{}",
+fn settings_editor_text(state: &SettingsEditorState, ui: Ui, width: usize) -> String {
+    let width = width.clamp(40, 140);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}{}\n",
         heading(settings_page_title(state.page), ui),
         if state.dirty { "  unsaved changes" } else { "" }
-    );
-    println!("{}", settings_page_subtitle(state.page));
-    println!();
+    ));
+    out.push_str(&format!(
+        "{}\n\n",
+        crate::cocli::ui::width::truncate_end(settings_page_subtitle(state.page), width)
+    ));
     match state.page {
         SettingsPage::Main => {
             for (idx, (_, label, desc)) in state.main_pages().iter().enumerate() {
-                print_settings_row(idx == state.selected, label, desc, ui);
+                push_settings_row(&mut out, idx == state.selected, label, desc, ui, width);
             }
         }
         SettingsPage::General => {
-            println!("Config path");
-            println!("  {}", path_text(&state.path.display().to_string(), ui));
-            println!();
-            println!("color        {}", color_choice_name(state.cfg.ui.color));
-            println!("theme        {}", state.cfg.ui.theme);
-            println!("experiments  {}", experiments_summary(&state.cfg));
+            out.push_str("Config path\n");
+            out.push_str(&format!(
+                "  {}\n\n",
+                path_text(
+                    &crate::cocli::ui::width::truncate_middle(
+                        &state.path.display().to_string(),
+                        width.saturating_sub(2)
+                    ),
+                    ui
+                )
+            ));
+            out.push_str(&format!(
+                "color        {}\n",
+                color_choice_name(state.cfg.ui.color)
+            ));
+            out.push_str(&format!("theme        {}\n", state.cfg.ui.theme));
+            out.push_str(&format!(
+                "experiments  {}\n",
+                experiments_summary(&state.cfg)
+            ));
         }
         SettingsPage::Ui => {
             let rows = [
@@ -5048,11 +5092,13 @@ fn print_settings_editor(state: &SettingsEditorState, ui: Ui) -> Result<()> {
                 ),
             ];
             for (idx, (label, value, desc)) in rows.iter().enumerate() {
-                print_settings_row(
+                push_settings_row(
+                    &mut out,
                     idx == state.selected,
                     label,
                     &format!("{value:<8} {desc}"),
                     ui,
+                    width,
                 );
             }
         }
@@ -5064,40 +5110,64 @@ fn print_settings_editor(state: &SettingsEditorState, ui: Ui) -> Result<()> {
                 } else {
                     on_off(item.enabled).to_string()
                 };
-                print_settings_row(
+                push_settings_row(
+                    &mut out,
                     idx == state.selected,
                     item.label,
                     &format!("{value:<7} {}", item.risk),
                     ui,
+                    width,
                 );
             }
         }
         SettingsPage::Ai => {
-            println!("AI tools list is read-only by default.");
-            println!("MCP and plan runner are controlled under Experiments.");
+            out.push_str("AI tools list is read-only by default.\n");
+            out.push_str("MCP and plan runner are controlled under Experiments.\n");
         }
         SettingsPage::Auth => {
-            println!("ADC and OAuth2 profiles live under `colab auth`.");
-            println!("Tokens are not stored in config.toml.");
+            out.push_str("ADC and OAuth2 profiles live under `colab auth`.\n");
+            out.push_str("Tokens are not stored in config.toml.\n");
         }
         SettingsPage::Support => {
-            println!("Bug reports are redacted by default.");
-            println!("Use `colab settings support bug-report` for a bundle.");
+            out.push_str("Bug reports are redacted by default.\n");
+            out.push_str("Use `colab settings support bug-report` for a bundle.\n");
         }
-        SettingsPage::Dev => println!("Private maintainer tools."),
+        SettingsPage::Dev => out.push_str("Private maintainer tools.\n"),
     }
     if let Some(message) = &state.message {
-        println!();
-        println!("{}", muted(message, ui));
+        out.push('\n');
+        out.push_str(&format!(
+            "{}\n",
+            muted(&crate::cocli::ui::width::truncate_end(message, width), ui)
+        ));
     }
-    println!();
-    println!("{}", muted(SETTINGS_FOOTER, ui));
-    Ok(())
+    out.push('\n');
+    out.push_str(&muted(
+        &crate::cocli::ui::width::truncate_end(SETTINGS_FOOTER, width),
+        ui,
+    ));
+    out.push('\n');
+    out
 }
 
-fn print_settings_row(selected: bool, label: &str, desc: &str, ui: Ui) {
-    let marker = if selected { "›" } else { " " };
-    println!("{marker} {:<16} {}", label, muted(desc, ui));
+fn push_settings_row(
+    out: &mut String,
+    selected: bool,
+    label: &str,
+    desc: &str,
+    ui: Ui,
+    width: usize,
+) {
+    let marker = if selected { ">" } else { " " };
+    let label_width = 16usize.min(width.saturating_sub(4));
+    let used = 2 + label_width + 1;
+    let desc_width = width.saturating_sub(used).max(8);
+    let label = crate::cocli::ui::width::truncate_end(label, label_width);
+    let desc = crate::cocli::ui::width::truncate_end(desc, desc_width);
+    out.push_str(&format!(
+        "{marker} {label:<label_width$} {}\n",
+        muted(&desc, ui)
+    ));
 }
 
 fn settings_page_title(page: SettingsPage) -> &'static str {
@@ -6246,7 +6316,7 @@ fn recipe_run_args(args: DistributeRunArgs) -> FleetConfigArgs {
 }
 
 fn recipe_config(config: String) -> String {
-    if config == "cocli.recipe.toml"
+    if config == "colab.recipe.toml"
         && !Path::new(&config).exists()
         && Path::new("slurp.toml").exists()
     {
@@ -6278,7 +6348,7 @@ fn handle_fleet(cmd: FleetCommands, ui: Ui, json: bool) -> Result<()> {
             let data = serde_json::json!({
                 "distribute_mode": "compliant",
                 "fallback_rotation": false,
-                "next_action": "run `colab distribute plan --config cocli.recipe.toml`"
+                "next_action": "run `colab distribute plan --config colab.recipe.toml`"
             });
             print_value(json, &data)
         }
@@ -6380,76 +6450,6 @@ fn handle_release(cmd: ReleaseCommands, json: bool) -> Result<()> {
                 "{}",
                 crate::cocli::release::names::semver_bump(&refs, pre_1)
             );
-            Ok(())
-        }
-    }
-}
-
-fn handle_agent(cmd: AgentCommands, ui: Ui, json: bool) -> Result<()> {
-    match cmd {
-        AgentCommands::Tools => handle_tools(ToolsCommands::List { json }, ui, json),
-        AgentCommands::Plan { goal, out } => {
-            let plan = format!(
-                "goal = {goal:?}\nconfirm_required = true\n\n[[steps]]\ntool = \"status.check\"\ninput = {{}}\n"
-            );
-            if let Some(out) = out {
-                std::fs::write(&out, plan)?;
-                ui.success(&format!("plan written: {out}"));
-            } else {
-                print!("{plan}");
-            }
-            Ok(())
-        }
-        AgentCommands::Run { plan, confirm } => {
-            if !confirm {
-                return Err(ColabError::config(
-                    "agent run requires --confirm; plans never execute implicitly",
-                ));
-            }
-            let body = std::fs::read_to_string(&plan)?;
-            append_audit(&format!("agent_run plan={plan} bytes={}", body.len()))?;
-            ui.success("agent plan accepted for confirmed execution audit");
-            ui.info(
-                "execution hooks are intentionally limited to built-in tool plans in this release",
-            );
-            Ok(())
-        }
-        AgentCommands::AuditPlan { plan } => {
-            let body = std::fs::read_to_string(&plan)?;
-            let data = serde_json::json!({
-                "plan": plan,
-                "bytes": body.len(),
-                "confirm_required": !body.contains("confirm_required = false")
-            });
-            print_value(json, &data)
-        }
-        AgentCommands::Slurp { goal, out } => {
-            if goal.to_ascii_lowercase().contains("bypass")
-                || goal.to_ascii_lowercase().contains("keepalive")
-            {
-                return Err(ColabError::config(
-                    "agent recipe drafts cannot suggest bypassing limits or anti-idle scripts",
-                ));
-            }
-            let plan = crate::cocli::slurp::config::SlurpConfig::sample();
-            let body = format!(
-                "# compliance: recipe planning will not bypass Colab rules\n# goal: {goal}\n{plan}"
-            );
-            if let Some(out) = out {
-                std::fs::write(&out, body)?;
-                ui.success(&format!("recipe draft written: {out}"));
-            } else {
-                print!("{body}");
-            }
-            Ok(())
-        }
-        AgentCommands::AuditSlurp { config } => {
-            let cfg = load_slurp(&config)?;
-            print_value(json, &crate::cocli::fleet::compliance::validate_slurp(&cfg))
-        }
-        AgentCommands::ExplainSlurp { config } => {
-            let cfg = load_slurp(&config)?;
-            println!("{}", cfg.explain());
             Ok(())
         }
     }
@@ -6985,7 +6985,7 @@ async fn handle_continue(
                 print_value(true, &manifest)?;
             } else {
                 ui.success("checkpoint tucked away");
-                println!("cocli ▸ fast path found");
+                println!("colab > fast path found");
                 ui.info("saved metadata and replay plan; live Python variables were not copied");
             }
             Ok(())
@@ -7534,6 +7534,58 @@ fn print_value<T: serde::Serialize>(json: bool, value: &T) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(value)?);
     }
     Ok(())
+}
+
+fn print_auth_status(value: serde_json::Value) {
+    let signed_in = value
+        .get("signed_in")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let account = value
+        .get("account")
+        .and_then(|v| v.as_str())
+        .unwrap_or("not signed in");
+    let adc_available = value
+        .get("adc_available")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let adc_path = value
+        .get("adc_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("<unknown>");
+    println!("Auth");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!(
+        "{:<12} {}",
+        "Google",
+        if signed_in { account } else { "not signed in" }
+    );
+    println!(
+        "{:<12} {}",
+        "ADC",
+        if adc_available {
+            "available"
+        } else {
+            "missing"
+        }
+    );
+    println!("{:<12} {}", "ADC path", adc_path);
+    if !signed_in {
+        println!();
+        println!("fix: run colab auth login");
+    }
+}
+
+fn print_auth_profile_status(value: &serde_json::Value) {
+    println!("Auth profile");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    for key in ["name", "kind", "account_hint", "storage_backend"] {
+        let shown = value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("<unknown>");
+        println!("{:<16} {}", key.replace('_', " "), shown);
+    }
 }
 
 fn continuations_dir(config: &ColabConfig) -> PathBuf {
@@ -8943,6 +8995,30 @@ mod tests {
         state.activate_selected();
         assert!(state.cfg.experiments.distribute);
         assert!(state.cfg.experiments.multi_login);
+    }
+
+    #[test]
+    fn settings_editor_text_is_vertical_and_width_bounded() {
+        let cfg = config::CocliConfig::default();
+        let ui = Ui::new(false, true, false);
+        for width in [60, 80, 100, 140] {
+            let mut state = SettingsEditorState::new(
+                PathBuf::from("config.toml"),
+                cfg.clone(),
+                SettingsPage::Main,
+            );
+            state.selected = 1;
+            let text = settings_editor_text(&state, ui, width);
+            assert!(text.contains("Settings"));
+            assert!(text.contains("> UI"));
+            assert!(!text.contains('\r'));
+            for line in text.lines() {
+                assert!(
+                    line.chars().count() <= width,
+                    "line exceeded width {width}: {line:?}"
+                );
+            }
+        }
     }
 
     #[test]

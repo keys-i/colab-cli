@@ -9,7 +9,7 @@ COLAB_CLI_LIVE=1 ./scripts/live-smoke.sh
 Secrets bridge smoke is separate and must use a disposable test value:
 
 ```sh
-COLAB_CLI_LIVE=1 COLAB_CLI_SECRET_TEST=1 COCLI_TEST_SECRET=not-real-test-secret ./scripts/live-secrets-smoke.sh
+COLAB_CLI_LIVE=1 COLAB_CLI_SECRET_TEST=1 COLAB_CLI_TEST_SECRET=not-real-test-secret ./scripts/live-secrets-smoke.sh
 ```
 
 The script writes a short report to:
@@ -30,7 +30,7 @@ target/live-smoke.md
 - `ai tools list --json`
 - `status check`
 
-The secrets smoke checks that `userdata.get("COCLI_TEST_SECRET")` returns a
+The secrets smoke checks that `userdata.get("COLAB_CLI_TEST_SECRET")` returns a
 length and that the raw value is not printed.
 
 ## Drive Approval

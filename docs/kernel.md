@@ -38,7 +38,7 @@ current session.
 
 ## Language Detection
 
-cocli detects language from Jupyter `kernel_info_reply` first:
+colab detects language from Jupyter `kernel_info_reply` first:
 
 1. `language_info.name`
 2. kernelspec language

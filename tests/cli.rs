@@ -269,6 +269,28 @@ fn top_level_help_has_final_command_spaces() {
 }
 
 #[test]
+fn ai_help_hides_gated_execution_surfaces() {
+    let out = bin().args(["ai", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("  tools"));
+    assert!(stdout.contains("  audit"));
+    assert!(stdout.contains("  explain"));
+    for hidden in ["mcp", "plan", "run", "code"] {
+        assert!(!stdout.contains(&format!("  {hidden}")), "{hidden}");
+    }
+}
+
+#[test]
+fn old_agent_alias_does_not_execute_plan() {
+    let out = bin().args(["agent", "plan", "x"]).output().unwrap();
+    assert!(!out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("moved: use `colab ai ...`"));
+    assert!(!stdout.contains("[[steps]]"));
+}
+
+#[test]
 fn verbose_count_parses_and_caps() {
     let cli = Cli::try_parse_from(["colab", "-v", "status"]).unwrap();
     assert_eq!(cli.verbose, 1);
@@ -377,11 +399,27 @@ fn status_human_output_is_not_json() {
     let out = bin().arg("status").output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("cocli status"));
+    assert!(stdout.contains("colab status"));
     assert!(stdout.contains("Auth"));
     assert!(!stdout.trim_start().starts_with('{'));
     assert!(!stdout.contains("Quick Actions"));
     assert!(!stdout.contains("\nNext\n"));
+}
+
+#[test]
+fn auth_status_human_output_is_not_json() {
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .args(["auth", "status"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("Auth"));
+    assert!(stdout.contains("Google"));
+    assert!(stdout.contains("ADC"));
+    assert!(!stdout.trim_start().starts_with('{'));
 }
 
 #[test]
@@ -695,12 +733,12 @@ fn secrets_bridge_flags_are_gated_and_redacted() {
     let home = tempfile::tempdir().unwrap();
     let blocked = bin()
         .env("HOME", home.path())
-        .env("COCLI_TEST_SECRET", "secret-value")
+        .env("COLAB_CLI_TEST_SECRET", "secret-value")
         .args([
             "run",
             "py",
             "--env",
-            "COCLI_TEST_SECRET",
+            "COLAB_CLI_TEST_SECRET",
             "--code",
             "print(1)",
         ])
@@ -882,7 +920,7 @@ fn dev_release_is_maintainer_gated() {
 
 #[test]
 fn fs_sync_json_dry_run_has_no_human_prefix() {
-    let temp = std::env::temp_dir().join(format!("cocli-test-{}", std::process::id()));
+    let temp = std::env::temp_dir().join(format!("colab-test-{}", std::process::id()));
     std::fs::create_dir_all(&temp).unwrap();
     std::fs::write(temp.join("a.txt"), "ok").unwrap();
     let out = bin()
@@ -906,5 +944,10 @@ fn fs_sync_json_dry_run_has_no_human_prefix() {
 }
 
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_colab"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_colab"));
+    let root = std::env::temp_dir().join(format!("colab-cli-tests-{}", std::process::id()));
+    command.env("HOME", &root);
+    command.env("XDG_CONFIG_HOME", root.join("config"));
+    command.env("XDG_DATA_HOME", root.join("data"));
+    command
 }

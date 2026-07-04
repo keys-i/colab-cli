@@ -27,15 +27,15 @@
 Run local benchmarks with:
 
 ```sh
-./scripts/bench-cocli.sh
+./scripts/bench-colab.sh
 ../shipyard/scripts/bench-shipyard.sh
 ```
 
 | Scenario | Tool | Time | Memory | Commands | Bytes | Output lines | Errors | Notes |
 |---|---|---:|---:|---:|---:|---:|---:|---|
-| startup help | cocli | 1.38 ms median | n/a | 1 | n/a | help text | 0 | local release binary, hyperfine |
-| status quick | cocli | 1.54 ms median | n/a | 1 | n/a | compact JSON | 0 | local release binary, hyperfine |
-| fs sync dry-run | cocli | 1.64 ms median | n/a | 1 | local only | JSON only | 0 | remote manifest cache not implemented |
+| startup help | colab | 1.38 ms median | n/a | 1 | n/a | help text | 0 | local release binary, hyperfine |
+| status quick | colab | 1.54 ms median | n/a | 1 | n/a | compact JSON | 0 | local release binary, hyperfine |
+| fs sync dry-run | colab | 1.64 ms median | n/a | 1 | local only | JSON only | 0 | remote manifest cache not implemented |
 | release name | Shipyard | 2.54 ms median | n/a | 1 | n/a | 1 | 0 | local release binary, hyperfine |
 | release bench | Shipyard | 173.58 ms median | n/a | 1 | n/a | short | 0 | release-plz not installed |
 | release plan --why | Shipyard | 103.24 ms median | n/a | 1 | n/a | short | 0 | release-plz not installed |
@@ -44,7 +44,7 @@ Run local benchmarks with:
 
 | Scenario | Metric | Baseline | New | Gain | Claim |
 |---|---|---:|---:|---:|---|
-| cocli no-op sync | bytes sent | not measured | not measured | n/a | not proven |
+| colab no-op sync | bytes sent | not measured | not measured | n/a | not proven |
 | Shipyard plan --why | wall time | release-plz not measured | 103.24 ms | n/a | not proven |
 | Shipyard bench | wall time | release-plz not measured | 173.58 ms | n/a | not proven |
 | Shipyard binary | bytes | release-plz not measured | 1,835,520 prior sample | n/a | not proven |
@@ -61,6 +61,6 @@ None yet.
 
 ## Next Optimization Targets
 
-- cocli: cache remote manifests so no-op sync can prove unchanged-tree savings.
-- cocli: run google-colab-cli comparison after Python deps are installed.
+- colab: cache remote manifests so no-op sync can prove unchanged-tree savings.
+- colab: run google-colab-cli comparison after Python deps are installed.
 - Shipyard: install release-plz, cargo-release, and git-cliff in a pinned tool cache and rerun comparison.

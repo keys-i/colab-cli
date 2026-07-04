@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cocli::error::{ColabError, Result};
 
-const APP_NAME: &str = "colab-cli";
+const APP_NAME: &str = "colab";
 
 pub fn config_dir() -> Result<PathBuf> {
     let base = dirs::config_dir()

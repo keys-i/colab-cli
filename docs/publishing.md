@@ -31,4 +31,4 @@ Release checklist:
 - verify no credentials are included
 - tag only after dry-runs pass
 
-Only `colab` is published. Internal `src/cocli/*` modules are not separate crates.
+Only the Cargo package `colab-cli` is published. The primary installed binary is `colab`; `colab-cli` is a compatibility alias. Internal `src/cocli/*` modules are not separate crates.

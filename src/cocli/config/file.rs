@@ -329,7 +329,7 @@ impl ColabConfig {
 
         if client_id.is_empty() {
             return Err(ColabError::config(
-                "COLAB_EXTENSION_CLIENT_ID is not set \u{2014} add it to your .env file or ~/.config/colab-cli/config.toml",
+                "COLAB_EXTENSION_CLIENT_ID is not set - add it to your .env file or ~/.config/colab/config.toml",
             ));
         }
 
@@ -341,7 +341,7 @@ impl ColabConfig {
 
         if client_secret.is_empty() {
             return Err(ColabError::config(
-                "COLAB_EXTENSION_CLIENT_NOT_SO_SECRET is not set \u{2014} add it to your .env file or ~/.config/colab-cli/config.toml",
+                "COLAB_EXTENSION_CLIENT_NOT_SO_SECRET is not set - add it to your .env file or ~/.config/colab/config.toml",
             ));
         }
 

@@ -1,4 +1,4 @@
-//! Built-in tool registry for `colab-cli`.
+//! Built-in tool registry for colab.
 //!
 //! The registry is intentionally enum-driven. External plugins can wrap these
 //! specs without forcing the core CLI to own an async trait object stack.

@@ -6,12 +6,12 @@ Scope: static repo pass on July 4, 2026. No code was changed. The repo had untra
 
 | Area | Evidence | Risk | Cleanup |
 |---|---|---|---|
-| Old package name in Rust API | `src/main.rs` imports `colab_cli::...`; tests also import `colab_cli::...` | Low external risk for a binary, but it keeps the old underscore name alive in crate paths. | Leave until a real library API is promised. Rename only with a crate-wide mechanical pass. |
-| Cargo description still says `exec` | `Cargo.toml` says "session, exec, fs..." | Published metadata advertises a hidden old surface. | Change to "session, run, fs..." in the next metadata/doc sweep. |
+| Package and binary names | Package/crate remains `colab-cli` / `colab_cli`; primary binary is `colab`; compatibility binary is `colab-cli`. | Low external risk; users run `colab` while Rust imports keep the crate name. | Keep this split documented. |
+| Cargo description | `Cargo.toml` says "sessions, code execution, files, Drive, status, auth, logs, and agent-facing tools." | No old `exec` wording remains in metadata. | clear |
 | Imported Python CLI is untracked | `google-colab-cli/` contains public `colab new`, `colab exec`, `colab install`, `colab update`, etc. | Search results and audits are noisy; easy to mistake old Python docs for current product docs. | Keep excluded from public release/package paths. Consider moving under `references/` if it stays. |
 | Imported colabtools tree is untracked | `colabtools/` contains `google.colab.*` implementation and tests. | Same noise risk; may look like owned public surface. | Keep as reference-only or delete when feature mapping is done. |
 | `slurp`/`fleet` internal names remain | `src/cocli/slurp`, `src/cocli/fleet`, `SlurpConfig`, `FleetCommands`, `fleet_name`. | Internal names bleed into config schemas, tests, and error strings. | Do not rename now. Rename only if `distribute` graduates from experimental. |
-| `slurp.toml` fallback remains | `recipe_config()` falls back from `cocli.recipe.toml` to `slurp.toml`. | Intentional migration support, but keeps old name alive. | Keep while hidden `slurp` alias exists; remove together. |
+| `slurp.toml` fallback remains | `recipe_config()` falls back from `colab.recipe.toml` to `slurp.toml`. | Intentional migration support, but keeps old name alive. | Keep while hidden `slurp` alias exists; remove together. |
 | Duplicate experiment keys | Config has `distribute`, `fleet`, and `slurp_automation`; `settings experiments set fleet` and `set slurp_automation` both turn on distribute. | Users can persist stale keys that no visible UI explains. | Hide from docs; prune stale keys after one migration cycle. |
 | Command-audit docs overstate `release` alias | Docs list top-level `release` as hidden, but tests assert `colab release ...` does not parse. Maintainer release is `settings dev release` behind features/env. | Maintainers may test the wrong command. | Update existing audit docs later; this audit records `release` as maintainer-only, not a hidden public alias. |
 | `tools` compatibility comment disagrees with dispatch | `args.rs` says old `tools` moved to `settings skills`; dispatch migrates to `colab ai tools ...`. | Maintainers may preserve the wrong alias target. | Treat `ai tools` as public tool catalog; `settings skills` is local enable/disable/admin. |
@@ -42,7 +42,7 @@ Scope: static repo pass on July 4, 2026. No code was changed. The repo had untra
 
 | File | Stale point | Action |
 |---|---|---|
-| `Cargo.toml` | Description says `exec`. | Change during metadata cleanup. |
+| `Cargo.toml` | Package is `colab-cli`, primary binary is `colab`. | Keep install docs explicit: `cargo install colab-cli`, run `colab`. |
 | `docs/command-audit.md` | Lists `release` among hidden top-level commands; code rejects top-level `release` unless future feature adds it. | Clarify as maintainer-only. |
 | `docs/qa.md` | Same hidden-list wording includes `release`. | Clarify no top-level release alias. |
 | `docs/settings.md` | Shows `fleet = false` and `slurp_automation = false` config keys. | Mark as compatibility-only or remove from user docs. |
@@ -55,4 +55,4 @@ Scope: static repo pass on July 4, 2026. No code was changed. The repo had untra
 2. Prune top-level `bug-report`; keep `settings support bug-report`.
 3. Expire `env`, `exec`, `mount`, `runtime`, `tools`, `config`, `doctor`, `log`, `new`, `sessions`, `stop`, `upload`, `download` only after one documented migration window.
 4. Keep `slurp`/`fleet` hidden until `distribute` either graduates or is removed.
-5. Leave module renames (`slurp`, `fleet`, crate `colab_cli`) for a mechanical cleanup after public surface decisions settle.
+5. Leave internal module renames (`slurp`, `fleet`) for a mechanical cleanup after public surface decisions settle.

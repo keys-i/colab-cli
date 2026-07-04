@@ -19,7 +19,7 @@ ADC support is local detection:
 colab auth login --method adc
 ```
 
-If ADC credentials are missing, cocli prints:
+If ADC credentials are missing, colab prints:
 
 ```text
 ADC credentials missing

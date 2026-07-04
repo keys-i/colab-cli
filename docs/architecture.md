@@ -2,7 +2,7 @@
 
 `colab` is one publishable Rust package.
 
-Implementation lives under `src/cocli/`, grouped by command space. The public API is intentionally tiny: the binary calls `cocli::cli::dispatch`, and most modules are internal implementation detail.
+Implementation lives under `src/cocli/`, grouped by command space. The public API is intentionally tiny: the binaries call the internal dispatcher, and most modules are implementation detail.
 
 Why one crate:
 

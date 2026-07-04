@@ -161,6 +161,21 @@ impl ColabClient {
         self.parse_json(resp).await
     }
 
+    pub async fn list_sessions(&self, proxy_url: &str, proxy_token: &str) -> Result<Vec<Session>> {
+        let url = format!("{}/api/sessions", proxy_url.trim_end_matches('/'));
+        crate::cocli::debug::debug2("http request method=GET path=/api/sessions");
+        let resp = self
+            .http
+            .get(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .send()
+            .await?;
+        let resp = self.check_status_raw(resp, &url).await?;
+        Ok(resp.json().await?)
+    }
+
     pub async fn list_kernels(
         &self,
         proxy_url: &str,

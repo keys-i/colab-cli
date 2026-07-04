@@ -26,7 +26,7 @@ No animation, colour-only decoration, launcher prompts, or fun lines are printed
 - `--quiet` is passed
 - `--no-color` is passed
 - `ui.color = "never"` is configured
-- `COLAB_NO_INTERACTIVE=1` is set
+- `COLAB_CLI_NO_INTERACTIVE=1` is set
 - `ui.tui = "never"` is configured
 
 Running `colab` with no args prints help. It does not print Quick Actions or command previews.
@@ -36,7 +36,7 @@ Running `colab` with no args prints help. It does not print Quick Actions or com
 Human status is sectioned text by default:
 
 ```text
-cocli status
+colab status
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Auth       ✓ ready

@@ -49,9 +49,9 @@ Add an experimental CLI secrets bridge:
 - auth: oauth2
 - subscription: Colab Pro+
 
-## cocli Design Decision
+## colab Design Decision
 
-cocli does not claim access to Colab web UI sidebar secrets. The bridge only
+colab does not claim access to Colab web UI sidebar secrets. The bridge only
 uses secrets explicitly supplied from the local environment, env files, or
 future keyring-backed local storage.
 

@@ -1,6 +1,6 @@
 # Debugging
 
-Verbose mode is for debugging cocli, not normal use.
+Verbose mode is for debugging colab, not normal use.
 
 ```sh
 colab -v status

@@ -56,12 +56,18 @@ pub async fn execute_colab_cell(
     code: &str,
     timeout: std::time::Duration,
 ) -> Result<CellOutput> {
-    let sessions = client.list_sessions_via_tunnel(&server.endpoint).await?;
+    let sessions = match client
+        .list_sessions(&server.proxy_url, &server.proxy_token)
+        .await
+    {
+        Ok(sessions) => sessions,
+        Err(_) => client.list_sessions_via_tunnel(&server.endpoint).await?,
+    };
     let Some(session) = sessions.iter().find(|s| s.kernel.is_some()) else {
         return Err(ColabError::drive(
             "drive_kernel_context_required",
             "Drive mount needs a Colab kernel session, not a plain Python process",
-            Some("colab-cli session url --open"),
+            Some("colab session url --open"),
             None,
         ));
     };
@@ -102,7 +108,7 @@ pub async fn execute_colab_cell_in_session_with_secrets(
             ColabError::drive(
                 "drive_kernel_context_required",
                 "Drive mount needs a Colab kernel session, not a plain Python process",
-                Some("colab-cli session url --open"),
+                Some("colab session url --open"),
                 None,
             )
         })?;
@@ -124,7 +130,7 @@ pub async fn execute_colab_cell_in_session_with_secrets(
     let execute = serde_json::json!({
         "header": {
             "msg_id": msg_id,
-            "username": "colab-cli",
+            "username": "colab",
             "session": session.id,
             "date": chrono::Utc::now().to_rfc3339(),
             "msg_type": "execute_request",
@@ -238,7 +244,7 @@ where
     let reply = serde_json::json!({
         "header": {
             "msg_id": uuid::Uuid::new_v4().to_string(),
-            "username": "colab-cli",
+            "username": "colab",
             "session": session_id,
             "date": chrono::Utc::now().to_rfc3339(),
             "msg_type": "input_reply",
@@ -277,7 +283,7 @@ pub async fn kernel_info(
     let request = serde_json::json!({
         "header": {
             "msg_id": msg_id,
-            "username": "colab-cli",
+            "username": "colab",
             "session": session.id,
             "date": chrono::Utc::now().to_rfc3339(),
             "msg_type": "kernel_info_request",
@@ -579,7 +585,7 @@ fn shell_unavailable_error(error: tungstenite::Error) -> ColabError {
     crate::cocli::debug::debug1("run.shell transport=colab_tty failed");
     crate::cocli::debug::debug3(format!("run.shell websocket error={error}"));
     ColabError::config(
-        "Shell is not available on this runtime\nfix: use `colab-cli run py --code \"...\"`\n     or open the browser session with `colab-cli session url --open`",
+        "Shell is not available on this runtime\nfix: use `colab run py --code \"...\"`\n     or open the browser session with `colab session url --open`",
     )
 }
 

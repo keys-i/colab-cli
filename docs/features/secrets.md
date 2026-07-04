@@ -78,7 +78,7 @@ Python code gets:
 - `google.colab.userdata.get("KEY")` for keys supplied to this run
 
 Shell and package commands get environment variables. Values are never printed
-by cocli.
+by colab.
 
 If the experiment is disabled:
 

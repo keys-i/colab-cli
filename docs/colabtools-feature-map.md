@@ -13,7 +13,7 @@ Reference checked: `googlecolab/colabtools` local checkout under `colabtools/`. 
 | output/log capture | `colab run ...`, `logs/export` where available | implemented/deferred by command | Run output streams normally; richer log export is kept as explicit support work. |
 | runtime/backend info | `colab status runtime --backend`, `--versions`, `--gpu`, `--tpu` | implemented | Uses public runtime/session surfaces. Backend package snapshots are reference data only. |
 | notebook execution | `colab run notebook` | implemented | Runs notebooks through the selected runtime path. |
-| `google.colab.userdata.get` | `colab run ... --env KEY`, hidden `colab secret ...` | experimental bridge | Colab web UI Secrets are frontend-backed; cocli bridges only explicit local secrets for CLI-run code. |
+| `google.colab.userdata.get` | `colab run ... --env KEY`, hidden `colab secret ...` | experimental bridge | Colab web UI Secrets are frontend-backed; colab bridges only explicit local secrets for CLI-run code. |
 | forms/widgets | none | not applicable outside notebook UI | Terminal widgets would be fake unless backed by a real CLI workflow. |
 | JavaScript/browser helpers | none | not applicable outside notebook UI | Browser-only APIs stay in notebooks. |
 | data tables/quick charts/autoviz | `ai code deps`, future explain-only helpers | deferred | Useful terminal equivalent would be static inspection, not browser rendering. |

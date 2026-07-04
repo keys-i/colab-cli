@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
     help_template = "Google Colab from the terminal\n\nUsage: colab [OPTIONS] <COMMAND>\n\nCommands:\n  session      Manage Colab sessions\n  run          Run code on Colab\n  fs           Files, sync, and Drive\n  status       Session and runtime status\n  auth         Sign in and inspect credentials\n  log          View and export history\n  settings     Config, UI, support, and experiments\n  ai           Agent-facing tools\n  update       Check or install updates\n  version      Show version\n  pay          Open Colab billing / compute units page\n  completions  Generate shell completions\n\nOptions:\n  -q, --quiet\n      --json\n  -v, --verbose\n      --no-color\n      --bell\n  -h, --help\n  -V, --version\n"
 )]
 pub struct Cli {
-    #[arg(long, short, global = true, env = "COLAB_QUIET")]
+    #[arg(long, short, global = true, env = "COLAB_CLI_QUIET")]
     pub quiet: bool,
 
     #[arg(long, global = true)]
@@ -1285,10 +1285,12 @@ pub enum AiCommands {
         #[command(subcommand)]
         command: Option<AiToolsCommands>,
     },
+    #[command(hide = true)]
     Mcp {
         #[command(subcommand)]
         command: Option<AiMcpCommands>,
     },
+    #[command(hide = true)]
     Plan {
         goal: String,
         #[arg(long)]
@@ -1300,6 +1302,7 @@ pub enum AiCommands {
     Explain {
         plan_file: String,
     },
+    #[command(hide = true)]
     Run {
         plan_file: String,
         #[arg(long)]
@@ -1312,6 +1315,7 @@ pub enum AiCommands {
         #[arg(long)]
         json: bool,
     },
+    #[command(hide = true)]
     Code {
         #[command(subcommand)]
         command: AiCodeCommands,
@@ -1396,7 +1400,7 @@ pub enum SlurpCommands {
 pub enum DistributeCommands {
     Plan(FleetConfigArgs),
     Status {
-        #[arg(long, default_value = "cocli.recipe.toml")]
+        #[arg(long, default_value = "colab.recipe.toml")]
         config: String,
     },
     Explain(FleetConfigArgs),
@@ -1419,7 +1423,7 @@ pub enum DistributeCommands {
 
 #[derive(clap::Args, Clone)]
 pub struct DistributeRunArgs {
-    #[arg(long, default_value = "cocli.recipe.toml")]
+    #[arg(long, default_value = "colab.recipe.toml")]
     pub config: String,
     #[arg(long)]
     pub dry_run: bool,
@@ -1434,7 +1438,7 @@ pub struct DistributeRunArgs {
 #[derive(Subcommand)]
 pub enum DistributeRecipeCommands {
     Init {
-        #[arg(long, default_value = "cocli.recipe.toml")]
+        #[arg(long, default_value = "colab.recipe.toml")]
         out: String,
     },
     Check(FleetConfigArgs),
@@ -1446,7 +1450,7 @@ pub enum DistributeRecipeCommands {
 pub enum DistributePoolCommands {
     Plan(FleetConfigArgs),
     Status {
-        #[arg(long, default_value = "cocli.recipe.toml")]
+        #[arg(long, default_value = "colab.recipe.toml")]
         config: String,
     },
     Cost(FleetConfigArgs),

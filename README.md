@@ -154,11 +154,11 @@ Compatibility groups and old aliases parse where migration is cheap. They stay h
 colab settings experiments set distribute true
 colab distribute recipe init
 colab distribute recipe explain
-colab distribute pool plan --config cocli.recipe.toml --cost
+colab distribute pool plan --config colab.recipe.toml --cost
 colab distribute run --dry-run
 ```
 
-`slurp.toml` is still read for old projects. New docs use `cocli.recipe.toml`.
+`slurp.toml` is still read for old projects. New docs use `colab.recipe.toml`.
 
 No distribute feature may rotate accounts to bypass Colab limits. Multi-login is locked unless `distribute` is enabled.
 
@@ -168,7 +168,7 @@ No distribute feature may rotate accounts to bypass Colab limits. Multi-login is
 src/
   main.rs
   lib.rs
-  cocli/
+  colab/
     cli/
     auth/
     session/

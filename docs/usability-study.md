@@ -13,7 +13,7 @@ Targets:
 - 0 critical errors
 - <= 1 help lookup on happy paths
 
-## cocli Tasks
+## colab Tasks
 
 | Task | Success Criteria | Measures |
 |---|---|---|
@@ -35,7 +35,7 @@ Targets:
 
 ## Heuristic Checklist
 
-| Heuristic | cocli Check | Shipyard Check |
+| Heuristic | colab Check | Shipyard Check |
 |---|---|---|
 | Visibility of status | status/plan output shows state | plan/status/safety output |
 | Match user language | session, fs, continue | plan, release, publish |

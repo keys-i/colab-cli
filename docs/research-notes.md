@@ -40,4 +40,4 @@ Rust supply-chain review tracks dependency effects: proc macros, build scripts, 
 
 Agent-friendly output means explicit labels, stable JSON, recoverable actions, and no hidden modal state.
 
-File sync claims require measured bytes. A no-op sync win is not proven until cocli has a cached or fetched remote manifest baseline.
+File sync claims require measured bytes. A no-op sync win is not proven until colab has a cached or fetched remote manifest baseline.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-if [ "${COLAB_CLI_LIVE:-}" != "1" ]; then
+if [ "${COLAB_CLI_LIVE:-${COLAB_CLI_LIVE:-}}" != "1" ]; then
   echo "set COLAB_CLI_LIVE=1 to run live Colab smoke tests"
   exit 2
 fi
@@ -55,7 +55,7 @@ skip_step() {
 }
 
 run_step "session list" "${bin[@]}" session list
-run_step "run python" "${bin[@]}" run py "${session_arg[@]}" --code "print('cocli-live-ok')"
+run_step "run python" "${bin[@]}" run py "${session_arg[@]}" --code "print('colab-live-ok')"
 run_step "runtime status" "${bin[@]}" status runtime --all
 run_step "fs ls content" "${bin[@]}" fs ls /content "${session_arg[@]}"
 run_step "drive status before mount" "${bin[@]}" fs drive status "${session_arg[@]}"

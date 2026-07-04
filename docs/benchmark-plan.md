@@ -12,7 +12,7 @@ Rules:
 - failed or missing competitor runs stay in the table
 - no network/API benchmark can create a public claim by itself
 
-## cocli Scenarios
+## colab Scenarios
 
 | Scenario | Baseline | Command | Metric |
 |---|---|---|---|

@@ -19,9 +19,9 @@ read once and executed once. Ctrl-C asks the remote kernel to interrupt; Ctrl-D
 exits the local REPL.
 
 `run shell` uses the Colab PTY websocket at `/colab/tty` where supported. It
-does not assume Jupyter `/api/terminals` exists. In TTY mode cocli enters raw
+does not assume Jupyter `/api/terminals` exists. In TTY mode colab enters raw
 mode only after the websocket connects and restores the terminal on exit. In
-piped mode cocli forwards stdin, sends `exit\n`, waits briefly for output, and
+piped mode colab forwards stdin, sends `exit\n`, waits briefly for output, and
 closes the websocket so scripts do not hang forever.
 
 Generic package commands follow the selected kernel:
@@ -53,7 +53,7 @@ colab run py --env HF_TOKEN --code "from google.colab import userdata; print(len
 ```
 
 `--env KEY` reads local environment variable `KEY` and exposes it to the remote
-run as `os.environ["KEY"]`. For Python runs, cocli also bridges
+run as `os.environ["KEY"]`. For Python runs, colab also bridges
 `google.colab.userdata.get("KEY")` for keys supplied to that run.
 
 `--env REMOTE:LOCAL` maps a local env var to a different remote name.

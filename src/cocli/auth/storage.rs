@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::cocli::error::{ColabError, Result};
+use crate::cocli::util::paths;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredAccessToken {
@@ -29,11 +30,7 @@ pub struct TokenStorage;
 
 impl TokenStorage {
     fn credentials_path() -> Result<PathBuf> {
-        let base = dirs::data_local_dir()
-            .ok_or_else(|| ColabError::config("could not determine data directory"))?;
-        let dir = base.join("colab-cli");
-        fs::create_dir_all(&dir)?;
-        Ok(dir.join("credentials.json"))
+        Ok(paths::data_dir()?.join("credentials.json"))
     }
 
     fn read() -> Result<CredentialsFile> {

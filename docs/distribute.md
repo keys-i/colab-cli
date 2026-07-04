@@ -52,7 +52,7 @@ colab distribute shard run --dry-run
 colab distribute shard resume
 ```
 
-`cocli.recipe.toml` is preferred. Existing `slurp.toml` files still work as a fallback.
+`colab.recipe.toml` is preferred. Existing `slurp.toml` files still work as a fallback.
 
 Compliance rules:
 

@@ -14,7 +14,7 @@ const FLOW_TIMEOUT_SECS: u64 = 120;
 const REDIRECT_SUCCESS_HTML: &str = r#"<!DOCTYPE html>
 <html><head><title>Signed in</title></head>
 <body style="font-family:sans-serif;text-align:center;padding:4em">
-<h1>Signed in to colab-cli</h1>
+<h1>Signed in to colab</h1>
 <p>You can close this tab.</p>
 </body></html>"#;
 

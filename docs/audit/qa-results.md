@@ -1,43 +1,76 @@
 # QA Results
 
-Scope: existing tests, representative CLI rendering, docs coverage, and release-risk gaps.
+Date: 2026-07-04
 
-## Results
+## Commands Run So Far
 
-- `cargo test --all-targets` passed.
-- Unit tests: 101 passed.
-- CLI integration tests: 26 passed.
-- Bench harness compile/run checks completed for continuation, core, hot paths, and manifest benches.
-- Representative render probes passed for help, status, settings, AI tools human output, and AI tools JSON output.
+```text
+cargo check --workspace --all-features
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo test --workspace --all-features --test cli
+cargo test --workspace --no-default-features
+cargo doc --workspace --all-features --no-deps
+cargo run --bin colab -- --help
+cargo run --bin colab --
+cargo run --bin colab -- ai --help
+cargo run --bin colab -- agent plan x
+./scripts/check-command-surface.sh
+```
 
-## Covered
+## Current Results
 
-- Top-level command surface and hidden legacy aliases.
-- Human versus JSON output separation.
-- No ANSI in JSON output.
-- Verbose/debug routing and secret redaction.
-- Settings persistence for direct commands.
-- Settings editor state behavior.
-- Experiment gates for distribute, continue, AST, MCP, and AI run.
-- Agent catalog shape and JSON fields.
-- Drive error mapping, kernel command parsing, package routing, and filesystem sync dry-run JSON.
+- `cargo check --workspace --all-features`: passed.
+- `cargo fmt --all --check`: passed.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`: passed.
+- `cargo test --workspace --all-features`: passed.
+- `cargo test --workspace --no-default-features`: passed.
+- `cargo doc --workspace --all-features --no-deps`: passed.
+- CLI integration tests: 32 passed with all features; 31 passed with no default features.
+- Default help prints app help and exits successfully.
+- `ai --help` hides gated execution/MCP/code surfaces.
+- Old hidden `agent` alias no longer executes a plan.
+- Settings renderer has width-bounded unit coverage.
+- `auth status` is human output by default and JSON only under `--json`.
 
-## Gaps
+## Covered By Tests
 
-- No live Colab session was exercised in this audit.
-- Interactive raw-mode behavior is mostly state-tested, not end-to-end terminal-tested.
-- MCP stdio serving is not implemented as a real transport smoke.
-- Manual probes used the existing built binary and local config state; release checks should use isolated temp config/home.
+- Default command surface.
+- Hidden experimental command gates.
+- JSON output has no ANSI.
+- Verbose output goes to stderr.
+- Settings direct persistence and state-machine behavior.
+- Settings editor text is vertical and bounded at 60/80/100/140 columns.
+- Drive timeout default allows human auth.
+- Drive kernel-code path is used for mount cell generation.
+- Shell `/colab/tty` URL shape.
+- Secret redaction and gate behavior.
+- AI tool catalog JSON/human cleanliness.
 
-## Test Plan
+## Not Live-Tested In This Pass
 
-- Keep the default release gate: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, `cargo doc --no-deps`.
-- Add one manual TTY smoke for `settings` before release.
-- Run `COLAB_CLI_LIVE=1 ./scripts/live-smoke.sh` only with explicit credentials and quota approval.
-- For MCP claims, add a stdio smoke only when a server exists.
+- Real Colab REPL execution.
+- Real `/colab/tty` shell.
+- Real Drive OAuth/credential propagation.
+- Real kernel restart/interrupt.
+- Real OAuth code exchange.
 
-## YAGNI
+Run only with explicit credentials/quota approval:
 
-- Do not add a broad browser/UI automation suite; this is a terminal CLI.
-- Do not add live Colab tests to default CI. Keep them opt-in because they need credentials, network, quota, and can be flaky.
-- Do not expand benchmark assertions into correctness gates. Unit and CLI tests already cover behavior.
+```text
+COLAB_CLI_LIVE=1 ./scripts/live-smoke.sh
+COLAB_CLI_LIVE=1 COLAB_CLI_SECRET_TEST=1 ./scripts/live-secrets-smoke.sh
+```
+
+## Release Gate Still Required
+
+Standard release gate:
+
+```text
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo test --workspace --no-default-features
+cargo doc --workspace --all-features --no-deps
+```

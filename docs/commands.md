@@ -156,7 +156,7 @@ colab version
 colab pay --dry-run
 ```
 
-`log` reports local history that cocli has actually recorded. It does not invent remote server logs. `update --install` never runs without an explicit install flag and confirmation.
+`log` reports local history that colab has actually recorded. It does not invent remote server logs. `update --install` never runs without an explicit install flag and confirmation.
 
 ## Continue
 
@@ -172,8 +172,8 @@ When enabled:
 ```sh
 colab continue save --session trainer --name run-a
 colab continue inspect run-a
-colab continue export run-a --out run-a.cocli
-colab continue import run-a.cocli
+colab continue export run-a --out run-a.colab
+colab continue import run-a.colab
 colab continue resume run-a --dry-run
 colab continue resume run-a --confirm
 colab continue last

@@ -99,18 +99,18 @@ impl SecretBundle {
         let json = serde_json::Value::Object(values).to_string();
         format!(
             r#"
-import os as _cocli_os
-_cocli_cli_secrets = {json}
-_cocli_os.environ.update(_cocli_cli_secrets)
+import os as _colab_cli_os
+_colab_cli_cli_secrets = {json}
+_colab_cli_os.environ.update(_colab_cli_cli_secrets)
 try:
-    from google.colab import userdata as _cocli_userdata
-    def _cocli_userdata_get(key):
+    from google.colab import userdata as _colab_cli_userdata
+    def _colab_cli_userdata_get(key):
         if not isinstance(key, str) or not key or any(ch.isspace() for ch in key):
             raise ValueError("Secret key must be a non-empty string without whitespace")
-        if key in _cocli_cli_secrets:
-            return _cocli_cli_secrets[key]
+        if key in _colab_cli_cli_secrets:
+            return _colab_cli_cli_secrets[key]
         raise KeyError("Secret was not provided to the CLI secrets bridge: %s" % key)
-    _cocli_userdata.get = _cocli_userdata_get
+    _colab_cli_userdata.get = _colab_cli_userdata_get
 except Exception:
     pass
 "#

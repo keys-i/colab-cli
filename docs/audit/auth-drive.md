@@ -1,6 +1,6 @@
 # Auth and Drive Audit
 
-Scope: OAuth, ADC, token storage, in-runtime `google.colab.auth`, Drive mount, credentials propagation, and what `cocli` should implement or refuse to fake.
+Scope: OAuth, ADC, token storage, in-runtime `google.colab.auth`, Drive mount, credentials propagation, and what `colab` should implement or refuse to fake.
 
 ## Host OAuth
 
@@ -20,7 +20,7 @@ Its public scopes are:
 
 OAuth2 uses a remote copy-paste flow with `https://sdk.cloud.google.com/applicationdefaultauthcode.html`, not OOB and not localhost (`google-colab-cli/src/colab_cli/auth.py:32`, `google-colab-cli/src/colab_cli/auth.py:57`).
 
-`cocli` currently uses browser localhost OAuth with PKCE:
+`colab` currently uses browser localhost OAuth with PKCE:
 
 1. Bind `127.0.0.1:0`.
 2. Build auth URL with nonce and code challenge.
@@ -30,7 +30,7 @@ OAuth2 uses a remote copy-paste flow with `https://sdk.cloud.google.com/applicat
 6. Exchange code for access/refresh tokens.
 7. Store access token, refresh token, and user info (`src/cocli/auth/oauth.rs:23`, `src/cocli/auth/oauth.rs:36`, `src/cocli/auth/oauth.rs:104`, `src/cocli/auth/oauth.rs:169`).
 
-`cocli` required scopes are currently only:
+`colab` required scopes are currently only:
 
 - `profile`
 - `email`
@@ -39,7 +39,7 @@ OAuth2 uses a remote copy-paste flow with `https://sdk.cloud.google.com/applicat
 Implement:
 
 - Keep PKCE and nonce validation.
-- Add Drive scope only when cocli implements Drive credentials propagation itself.
+- Add Drive scope only when colab implements Drive credentials propagation itself.
 - If remote/headless login is a target, add a copy-paste flow rather than relying only on localhost.
 
 Do not fake:
@@ -48,7 +48,7 @@ Do not fake:
 
 ## Token Storage
 
-`cocli` stores credentials under the platform local data dir as `colab/credentials.json` with mode `0600` on Unix. It stores:
+`colab` stores credentials under the platform local data dir as `colab/credentials.json` with mode `0600` on Unix. It stores:
 
 - refresh token
 - access token plus expiry
@@ -69,7 +69,7 @@ Do not fake:
 
 `google-colab-cli` ADC path calls `google.auth.default(scopes=PUBLIC_SCOPES)`, handles scope requirements, suppresses the irrelevant Cloud SDK quota-project warning, and wraps credentials in an `AuthorizedSession` (`google-colab-cli/src/colab_cli/auth.py:133`).
 
-`cocli` currently does not use ADC credentials for Colab API calls. `auth login --method adc` only checks whether an ADC file exists at `GOOGLE_APPLICATION_CREDENTIALS` or `~/.config/gcloud/application_default_credentials.json` and prints setup guidance (`src/cocli/cli/dispatch.rs:884`).
+`colab` currently does not use ADC credentials for Colab API calls. `auth login --method adc` only checks whether an ADC file exists at `GOOGLE_APPLICATION_CREDENTIALS` or `~/.config/gcloud/application_default_credentials.json` and prints setup guidance (`src/cocli/cli/dispatch.rs:884`).
 
 Implement:
 
@@ -154,7 +154,7 @@ Drive auth is the main missing real-transport piece.
 
 See `google-colab-cli/src/colab_cli/commands/automation.py:55`.
 
-`cocli` currently executes the Drive mount cell and classifies `request_auth`/`blocking_request` output as `drive_browser_approval_required`, telling the user to open the browser session and retry (`src/cocli/cli/dispatch.rs:2919`, `src/cocli/cli/dispatch.rs:3480`, `src/cocli/cli/dispatch.rs:3529`).
+`colab` currently executes the Drive mount cell and classifies `request_auth`/`blocking_request` output as `drive_browser_approval_required`, telling the user to open the browser session and retry (`src/cocli/cli/dispatch.rs:2919`, `src/cocli/cli/dispatch.rs:3480`, `src/cocli/cli/dispatch.rs:3529`).
 
 Implement:
 
@@ -168,9 +168,9 @@ Do not fake:
 - Do not swallow `request_auth` and report success.
 - Do not assume browser approval happened unless credentials propagation returns success or the subsequent remote status probe confirms a mounted Drive.
 
-## Current `cocli` Drive Behavior
+## Current `colab` Drive Behavior
 
-`cocli fs drive mount` currently:
+`colab fs drive mount` currently:
 
 1. Loads selected local session.
 2. Refreshes proxy token if needed.
@@ -198,11 +198,11 @@ Do not fake:
 
 ## Logs and Audit Trail
 
-`google-colab-cli` records local history events for automation, Drive auth needed/success, stdin, and outputs. `cocli` has debug logging and a `session logs` placeholder that explicitly says no persisted stream is available.
+`google-colab-cli` records local history events for automation, Drive auth needed/success, stdin, and outputs. `colab` has debug logging and a `session logs` placeholder that explicitly says no persisted stream is available.
 
 Implement:
 
-- If adding persisted logs, record cocli commands, kernel execution requests, selected session, and summarized outputs with redaction.
+- If adding persisted logs, record colab commands, kernel execution requests, selected session, and summarized outputs with redaction.
 - Keep Drive auth events as local audit entries, not remote logs.
 
 Do not fake:

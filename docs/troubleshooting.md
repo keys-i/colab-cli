@@ -23,5 +23,5 @@ colab --json -v status
 Debug lines go to stderr, so redirect them separately when filing a bug report:
 
 ```sh
-colab -vv fs drive mount 2>cocli-debug.log
+colab -vv fs drive mount 2>colab-debug.log
 ```

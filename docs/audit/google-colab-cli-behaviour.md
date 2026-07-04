@@ -40,7 +40,7 @@ Host auth has two providers:
 
 OAuth2 uses a remote copy-paste flow through `https://sdk.cloud.google.com/applicationdefaultauthcode.html`, not localhost and not OOB. Tokens are stored at `~/.config/colab/token.json`; session state is `~/.config/colab/sessions.json`; settings are `~/.config/colab/settings.json`.
 
-Safe cocli difference: keeping PKCE localhost OAuth is fine, but document it as a deliberate UX difference. Do not claim ADC parity unless ADC credentials actually feed Colab API requests with the required scopes.
+Safe colab difference: keeping PKCE localhost OAuth is fine, but document it as a deliberate UX difference. Do not claim ADC parity unless ADC credentials actually feed Colab API requests with the required scopes.
 
 ## Drive
 
@@ -48,7 +48,7 @@ Safe cocli difference: keeping PKCE localhost OAuth is fine, but document it as 
 
 Important behaviour: google-colab-cli intercepts kernel `colab_request` messages with `authType=dfs_ephemeral`, calls `/tun/m/credentials-propagation/<endpoint>` dry-run and real propagation requests, may print a browser approval URL, then replies on the kernel stdin channel with the matching `colab_msg_id`.
 
-Safe cocli difference: cocli may keep the browser-open fallback, but should not report Drive as fully CLI-native until it implements credentials propagation and confirms mount status remotely.
+Safe colab difference: colab may keep the browser-open fallback, but should not report Drive as fully CLI-native until it implements credentials propagation and confirms mount status remotely.
 
 ## REPL
 
@@ -56,7 +56,7 @@ Safe cocli difference: cocli may keep the browser-open fallback, but should not 
 
 TTY input starts a prompt-toolkit Python REPL with `>>>`, multiline via `Esc Enter` or `Ctrl-J`, `/quit`, `quit()`, and `exit()`. Piped stdin executes once through the same Jupyter runtime path, records history as `source=piped`, and exits cleanly on empty input.
 
-Safe cocli difference: `run repl` is a better grouped name. Keep piped stdin semantics only if they are useful; otherwise direct users to `run code` or `run script`.
+Safe colab difference: `run repl` is a better grouped name. Keep piped stdin semantics only if they are useful; otherwise direct users to `run code` or `run script`.
 
 ## Console
 
@@ -64,7 +64,7 @@ Safe cocli difference: `run repl` is a better grouped name. Keep piped stdin sem
 
 It connects to `/colab/tty?colab-runtime-proxy-token=...` over websocket, puts TTY stdin in raw mode, sends terminal size, streams raw ANSI data, and restores terminal settings in `finally`. For piped stdin, EOF sends `exit\n`, waits briefly, and closes the websocket to avoid hanging on tmux/bash.
 
-Safe cocli difference: `run shell` is a clearer grouped name. Preserve raw terminal restoration and piped EOF handling.
+Safe colab difference: `run shell` is a clearer grouped name. Preserve raw terminal restoration and piped EOF handling.
 
 ## Log
 
@@ -72,7 +72,7 @@ Safe cocli difference: `run shell` is a clearer grouped name. Preserve raw termi
 
 No session lists sessions with local history. With a session, it prints compact event lines for executions, file operations, automation, stdin/input replies, and keep-alive lifecycle. Export format is inferred from output suffix: `.ipynb`, `.md`, `.txt`, `.jsonl`.
 
-Safe cocli difference: grouped `log list/show/export/tail` is fine. Do not invent server logs; clearly label absent persisted logs.
+Safe colab difference: grouped `log list/show/export/tail` is fine. Do not invent server logs; clearly label absent persisted logs.
 
 ## Update
 
@@ -80,7 +80,7 @@ Safe cocli difference: grouped `log list/show/export/tail` is fine. Do not inven
 
 Banner suppression is intentional for pipeable/display commands: `update`, `version`, `log`, `pay`, `help`, `url`, `whoami`, `readme`, `skill`.
 
-Safe cocli difference: requiring explicit `--yes` for self-install is safer. Keep update output out of pipeable commands.
+Safe colab difference: requiring explicit `--yes` for self-install is safer. Keep update output out of pipeable commands.
 
 ## Pay and Version
 
@@ -88,7 +88,7 @@ Safe cocli difference: requiring explicit `--yes` for self-install is safer. Kee
 
 `colab version` prints `Version: <version>` only.
 
-Safe cocli difference: `pay --dry-run` and JSON output are useful additions. Keep a plain pipeable version command.
+Safe colab difference: `pay --dry-run` and JSON output are useful additions. Keep a plain pipeable version command.
 
 ## Stop, URL, Restart Kernel
 
@@ -98,7 +98,7 @@ Safe cocli difference: `pay --dry-run` and JSON output are useful additions. Kee
 
 `colab restart-kernel [-s SESSION]` sends a kernel restart through the Jupyter runtime and stops the runtime client afterward. It has no confirmation flag.
 
-Safe cocli difference: `session stop`, `session url`, and `session kernel restart --yes` are safer grouped forms. Keep compatibility aliases only where cheap and documented as migration aids.
+Safe colab difference: `session stop`, `session url`, and `session kernel restart --yes` are safer grouped forms. Keep compatibility aliases only where cheap and documented as migration aids.
 
 ## UX Style
 
@@ -109,11 +109,11 @@ Safe cocli difference: `session stop`, `session url`, and `session kernel restar
 - Missing unique session paths use shared resolution: no sessions gives a create-one hint; one active session is auto-selected; multiple sessions require `-s`.
 - Errors are often friendly but not always structured; Typer tracebacks can leak for early setup failures like log-file permissions.
 
-Safe cocli difference: cocli's grouped command tree, JSON mode, confirmations, and richer error hints are improvements. Avoid copying Typer tracebacks or unsolicited update banners into machine-readable output.
+Safe colab difference: colab's grouped command tree, JSON mode, confirmations, and richer error hints are improvements. Avoid copying Typer tracebacks or unsolicited update banners into machine-readable output.
 
-## Safe Differences for cocli
+## Safe Differences for colab
 
-- Keep cocli's primary surface grouped: `session`, `run`, `fs`, `status`, `auth`, `log`, `settings`, `ai`.
+- Keep colab's primary surface grouped: `session`, `run`, `fs`, `status`, `auth`, `log`, `settings`, `ai`.
 - Keep flat google-colab-cli names hidden or migration-only: `new`, `sessions`, `stop`, `upload`, `download`.
 - Do not add more flat aliases unless live migration demand justifies them.
 - Keep `session url` pipeable and browser opening opt-in.

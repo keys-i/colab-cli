@@ -1,21 +1,24 @@
 #!/usr/bin/env sh
 set -eu
 
-cargo run -- --help >/tmp/cocli-help.txt
-cargo run -- status --help >/tmp/cocli-status-help.txt
-cargo run -- run --help >/tmp/cocli-run-help.txt
-cargo run -- fs --help >/tmp/cocli-fs-help.txt
-cargo run -- settings skills list --help >/tmp/cocli-skills-help.txt
+cargo run --bin colab -- --help >/tmp/colab-help.txt
+cargo run --bin colab -- status --help >/tmp/colab-status-help.txt
+cargo run --bin colab -- run --help >/tmp/colab-run-help.txt
+cargo run --bin colab -- fs --help >/tmp/colab-fs-help.txt
+cargo run --bin colab -- settings skills list --help >/tmp/colab-skills-help.txt
 
 for old in exec env mount runtime tools config doctor release agent; do
-  if grep -q "  $old" /tmp/cocli-help.txt; then
+  if grep -q "  $old" /tmp/colab-help.txt; then
     echo "old top-level command leaked into help: $old" >&2
     exit 1
   fi
 done
 
-if rg -n "colab-cli (exec|env|mount|runtime|tools|config|doctor|drivemount)" README.md docs \
-  -g '!docs/command-audit.md' -g '!docs/migration-from-google-colab-cli.md'
+if rg -n "colab (exec|env|mount|runtime|tools|config|doctor|drivemount)\\b" README.md docs \
+  -g '!docs/audit/**' \
+  -g '!docs/command-audit.md' \
+  -g '!docs/google-colab-cli-map.md' \
+  -g '!docs/migration-from-google-colab-cli.md'
 then
   echo "old command example leaked outside migration docs" >&2
   exit 1

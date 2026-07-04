@@ -1,4 +1,4 @@
-//! Stable JSON protocol types shared by `colab-cli` crates.
+//! Stable JSON protocol types shared by the colab CLI.
 
 use serde::{Deserialize, Serialize};
 

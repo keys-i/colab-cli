@@ -1,6 +1,6 @@
 # Colab Transport Audit
 
-Scope: `google-colab-cli`, `colabtools`, and current Rust `cocli` transport paths for assignment, runtime proxying, Jupyter REST/WebSocket, `/colab/tty`, Contents API, logs, and kernel controls.
+Scope: `google-colab-cli`, `colabtools`, and current Rust `colab` transport paths for assignment, runtime proxying, Jupyter REST/WebSocket, `/colab/tty`, Contents API, logs, and kernel controls.
 
 ## Sources Read
 
@@ -25,7 +25,7 @@ Real flow:
 
 `google-colab-cli` implements this in `Client._issue_request()` and constants around `TUN_ENDPOINT = "/tun/m"` (`google-colab-cli/src/colab_cli/client.py:28`, `google-colab-cli/src/colab_cli/client.py:135`, `google-colab-cli/src/colab_cli/client.py:163`).
 
-`cocli` mirrors it in `ColabClient::colab_request()`, `colab_url()`, and `strip_xssi()` (`src/cocli/session/client.rs:24`, `src/cocli/session/client.rs:599`, `src/cocli/session/client.rs:635`).
+`colab` mirrors it in `ColabClient::colab_request()`, `colab_url()`, and `strip_xssi()` (`src/cocli/session/client.rs:24`, `src/cocli/session/client.rs:599`, `src/cocli/session/client.rs:635`).
 
 Implement:
 
@@ -47,17 +47,17 @@ Assign:
 4. Otherwise parse `token` from the GET response and `POST` the same URL with `X-Goog-Colab-Token: <token>` and empty body.
 5. Persist `endpoint`, `runtimeProxyInfo.url`, `runtimeProxyInfo.token`, and token expiry.
 
-`google-colab-cli` implements GET then POST in `assign()`, `_get_assignment()`, and `_post_assignment()` (`google-colab-cli/src/colab_cli/client.py:226`). `cocli` does the same in `ColabClient::assign()` and adds High-RAM `shape=hm` (`src/cocli/session/client.rs:87`, `src/cocli/session/client.rs:770`).
+`google-colab-cli` implements GET then POST in `assign()`, `_get_assignment()`, and `_post_assignment()` (`google-colab-cli/src/colab_cli/client.py:226`). `colab` does the same in `ColabClient::assign()` and adds High-RAM `shape=hm` (`src/cocli/session/client.rs:87`, `src/cocli/session/client.rs:770`).
 
 Refresh:
 
-- `cocli` calls `GET /tun/m/runtime-proxy-token?authuser=0&endpoint=<endpoint>&port=8080` with `X-Colab-Tunnel: Google` and updates the stored proxy token (`src/cocli/session/client.rs:147`).
+- `colab` calls `GET /tun/m/runtime-proxy-token?authuser=0&endpoint=<endpoint>&port=8080` with `X-Colab-Tunnel: Google` and updates the stored proxy token (`src/cocli/session/client.rs:147`).
 
 Unassign:
 
 1. `GET /tun/m/unassign/<endpoint>` to get an XSRF token.
 2. `POST /tun/m/unassign/<endpoint>` with `X-Goog-Colab-Token`.
-3. `cocli` deletes Jupyter sessions first via the runtime tunnel, then unassigns (`src/cocli/session/commands.rs:121`).
+3. `colab` deletes Jupyter sessions first via the runtime tunnel, then unassigns (`src/cocli/session/commands.rs:121`).
 
 Implement:
 
@@ -76,7 +76,7 @@ Two equivalent paths exist:
 - Tunnel path through Colab front-door: `/tun/m/<endpoint>/api/...` with Google bearer token and `X-Colab-Tunnel: Google`.
 - Direct runtime proxy URL from `runtimeProxyInfo.url`: `<proxy_url>/api/...` with `X-Colab-Runtime-Proxy-Token`.
 
-`google-colab-cli` mostly uses the proxy URL through `jupyter_kernel_client` and `ContentsClient`. `cocli` uses both:
+`google-colab-cli` mostly uses the proxy URL through `jupyter_kernel_client` and `ContentsClient`. `colab` uses both:
 
 - `/tun/m/<endpoint>/api/sessions` for session discovery (`src/cocli/session/client.rs:156`).
 - Direct proxy URL for `/api/kernels`, `/api/kernelspecs`, `/api/sessions`, `/api/terminals`, and `/api/contents` (`src/cocli/session/client.rs:164`, `src/cocli/session/client.rs:183`, `src/cocli/session/client.rs:202`, `src/cocli/session/client.rs:266`, `src/cocli/session/client.rs:355`).
@@ -102,7 +102,7 @@ Do not fake:
 
 It sets `_own_kernel = False` so closing the CLI does not delete the remote kernel (`google-colab-cli/src/colab_cli/runtime.py:98`, `google-colab-cli/src/colab_cli/runtime.py:106`, `google-colab-cli/src/colab_cli/runtime.py:116`).
 
-`cocli` hand-builds Jupyter protocol messages over `tokio_tungstenite`:
+`colab` hand-builds Jupyter protocol messages over `tokio_tungstenite`:
 
 - Discovers session and kernel IDs.
 - Connects to the kernel websocket.
@@ -131,9 +131,9 @@ Real terminal flow:
 5. Read JSON frames containing `data` and write raw ANSI text to stdout.
 6. For piped stdin, send `exit\n`, wait briefly for tail output, then close.
 
-`google-colab-cli` implements this in `console.py` (`google-colab-cli/src/colab_cli/console.py:87`). `cocli` implements it in `run_shell()` and helper functions (`src/cocli/exec/runner.rs:226`, `src/cocli/exec/runner.rs:406`, `src/cocli/exec/runner.rs:421`).
+`google-colab-cli` implements this in `console.py` (`google-colab-cli/src/colab_cli/console.py:87`). `colab` implements it in `run_shell()` and helper functions (`src/cocli/exec/runner.rs:226`, `src/cocli/exec/runner.rs:406`, `src/cocli/exec/runner.rs:421`).
 
-`cocli` also uses standard Jupyter terminals:
+`colab` also uses standard Jupyter terminals:
 
 - `POST /api/terminals`
 - WebSocket `/terminals/websocket/<name>`
@@ -154,7 +154,7 @@ Do not fake:
 
 `google-colab-cli` uses direct proxy `GET|PUT|DELETE <proxy_url>/api/contents/<path>` with query param `colab-runtime-proxy-token` (`google-colab-cli/src/colab_cli/contents.py:20`).
 
-`cocli` uses the same Jupyter Contents model with the proxy token as a header:
+`colab` uses the same Jupyter Contents model with the proxy token as a header:
 
 - Upload: `PUT /api/contents/<path>` with JSON `{ "type": "file", "format": "base64", "content": "..." }`.
 - Stat: `GET /api/contents/<path>?content=0`.
@@ -182,7 +182,7 @@ Jupyter REST controls:
 - Interrupt/restart: `POST /api/kernels/<id>/<action>`.
 - Shutdown: `DELETE /api/kernels/<id>`.
 
-These are implemented in `cocli` client methods (`src/cocli/session/client.rs:164`, `src/cocli/session/client.rs:183`, `src/cocli/session/client.rs:202`, `src/cocli/session/client.rs:223`, `src/cocli/session/client.rs:317`) and command dispatch (`src/cocli/cli/dispatch.rs:2240`).
+These are implemented in `colab` client methods (`src/cocli/session/client.rs:164`, `src/cocli/session/client.rs:183`, `src/cocli/session/client.rs:202`, `src/cocli/session/client.rs:223`, `src/cocli/session/client.rs:317`) and command dispatch (`src/cocli/cli/dispatch.rs:2240`).
 
 Implement:
 
@@ -197,13 +197,13 @@ Do not fake:
 
 `google-colab-cli` has a local `HistoryLogger` and records events around execution/automation. It is not a remote Colab log API.
 
-`cocli` currently exposes `session logs`, but returns an explicit empty result: `available: false`, empty logs, and a note that no persisted stream exists (`src/cocli/cli/dispatch.rs:986`).
+`colab` currently exposes `session logs`, but returns an explicit empty result: `available: false`, empty logs, and a note that no persisted stream exists (`src/cocli/cli/dispatch.rs:986`).
 
 Implement:
 
-- Keep local command history/log export only after cocli actually persists executions.
+- Keep local command history/log export only after colab actually persists executions.
 - Consider remote stdout/stderr streaming as runtime output, not "session logs".
 
 Do not fake:
 
-- Do not invent remote logs. If no cocli log stream exists, say so exactly.
+- Do not invent remote logs. If no colab log stream exists, say so exactly.
