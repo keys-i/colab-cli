@@ -21,6 +21,16 @@ pub struct StoredServer {
     pub proxy_token: String,
     pub token_expires_at: DateTime<Utc>,
     pub date_assigned: DateTime<Utc>,
+    #[serde(default)]
+    pub selected_kernel_id: Option<String>,
+    #[serde(default)]
+    pub selected_kernel_name: Option<String>,
+    #[serde(default)]
+    pub kernel_language: Option<String>,
+    #[serde(default)]
+    pub kernel_language_version: Option<String>,
+    #[serde(default)]
+    pub kernel_cache_stale: bool,
 }
 
 pub struct ServerStorage {
@@ -139,6 +149,11 @@ mod tests {
             proxy_token: "tok".into(),
             token_expires_at: Utc::now(),
             date_assigned: Utc::now(),
+            selected_kernel_id: None,
+            selected_kernel_name: None,
+            kernel_language: None,
+            kernel_language_version: None,
+            kernel_cache_stale: false,
         }
     }
 

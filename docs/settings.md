@@ -105,6 +105,13 @@ colab-cli settings ui set unicode true
 Interactive UI settings include color mode, neon accents, theme, animations,
 terminal bell, fun lines, compact output, icons, unicode, and TUI panels.
 
+Kernel language and selected kernel metadata are cached in the session store,
+not in UI settings. Refresh them with:
+
+```sh
+colab-cli session kernel refresh
+```
+
 ## Experiments
 
 Experiments are off by default and saved in `config.toml`.

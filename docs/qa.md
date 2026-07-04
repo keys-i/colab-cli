@@ -20,6 +20,13 @@
 - `run ast`, `ai mcp`, `ai plan`, and `ai run` fail with `experimental feature disabled` until enabled.
 - `distribute` and `continue` fail with `experimental feature disabled` until enabled.
 - `run pip install`, `run pip freeze`, and `run pip restore` parse.
+- `session kernel list/current/select/specs/start/interrupt/restart/shutdown/refresh` parse.
+- `status kernel --all` and `status kernel --refresh` parse.
+- Kernel list output is aligned and does not print raw debug booleans.
+- `run pkg` routes through active kernel language.
+- `run pip` is blocked when cached active kernel metadata is Julia or R.
+- `run julia` and `run r` parse for their package surfaces.
+- `run --help` uses cached kernel metadata and does not contact Colab.
 - `run repl` uses local line editing and kernel execution; arrow keys do not reach the remote kernel as escape bytes.
 - `echo "print('hello')" | colab-cli run repl` executes once and exits.
 - `run shell` connects through `/colab/tty` where supported and does not assume `/api/terminals`.

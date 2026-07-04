@@ -11,9 +11,10 @@ use crate::cocli::cli::{
     AuthProfileArgs, Cli, Commands, CompatTransferArgs, ConfigCommands, ContinueCommands,
     DistributeCommands, DistributePoolCommands, DistributeRecipeCommands, DistributeRunArgs,
     DistributeShardCommands, EnvCommands, ExecCommands, FileCommands, FleetCommands,
-    FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, MountCommands,
-    PipCommands, RunCommands, RuntimeCommands, ServerCommands, SessionCommands,
-    SessionKernelCommands, SessionLogsArgs, SessionNameArg, SessionNewArgs,
+    FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, JuliaCommands,
+    JuliaPkgCommands, KernelActionArgs, KernelSessionArg, MountCommands, PipCommands, PkgCommands,
+    RCommands, RPkgCommands, RenvCommands, RunCommands, RuntimeCommands, ServerCommands,
+    SessionCommands, SessionKernelCommands, SessionLogsArgs, SessionNameArg, SessionNewArgs,
     SettingsBillingCommands, SettingsCommands, SettingsExperimentsCommands, SettingsUiCommands,
     SettingsUpdateCommands, SkillCommands, SlurpCommands, StatusCommands, SupportCommands,
     ToolsCommands,
@@ -24,14 +25,19 @@ use crate::cocli::config::{self, ColabConfig};
 use crate::cocli::debug::{self, Verbosity};
 use crate::cocli::error::{ColabError, Result};
 use crate::cocli::exec::runner;
+use crate::cocli::kernel::{self, KernelInfoSummary, KernelLanguage};
 use crate::cocli::session::ServerManager;
 use crate::cocli::session::client::ColabClient;
-use crate::cocli::session::model::{Session, Shape, Variant};
+use crate::cocli::session::model::{JupyterKernel, KernelSpecResponse, Session, Shape, Variant};
 use crate::cocli::session::store::StoredServer;
 use crate::cocli::ui::Ui;
 
 pub async fn main_entry() {
     let _ = dotenvy::dotenv();
+
+    if maybe_print_dynamic_run_help() {
+        return;
+    }
 
     let cli = Cli::parse();
     let stdout_tty = std::io::stdout().is_terminal();
@@ -80,6 +86,28 @@ pub async fn main_entry() {
 
         std::process::exit(1);
     }
+}
+
+fn maybe_print_dynamic_run_help() -> bool {
+    let args: Vec<String> = std::env::args().collect();
+    let Some(pos) = args.iter().position(|arg| arg == "run") else {
+        return false;
+    };
+    if !args[pos + 1..]
+        .iter()
+        .any(|arg| arg == "--help" || arg == "-h")
+    {
+        return false;
+    }
+    if args[pos + 1..]
+        .iter()
+        .any(|arg| arg == "pip" || arg == "pkg" || arg == "julia" || arg == "r")
+    {
+        return false;
+    }
+    let language = cached_kernel_language().map(|info| info.language);
+    print_run_help_for_language(language.as_ref());
+    true
 }
 
 fn print_error_json(e: &ColabError) {
@@ -370,6 +398,72 @@ fn handle_launcher(ui: Ui) -> Result<()> {
     Ok(())
 }
 
+fn cached_kernel_language() -> Option<KernelInfoSummary> {
+    let config = ColabConfig::load(true).ok()?;
+    let manager = make_manager(&config).ok()?;
+    let server = manager
+        .list_local()
+        .ok()?
+        .into_iter()
+        .max_by_key(|s| s.date_assigned)?;
+    let language = server
+        .kernel_language
+        .as_deref()
+        .map(KernelLanguage::detect)?;
+    Some(KernelInfoSummary {
+        language,
+        version: server.kernel_language_version,
+    })
+}
+
+fn print_run_help_for_language(language: Option<&KernelLanguage>) {
+    println!("Run code and prepare runtimes");
+    println!();
+    println!("Usage: colab-cli run <COMMAND>");
+    println!();
+    println!("Commands:");
+    match language {
+        Some(KernelLanguage::Python) => {
+            println!("  py        Run Python code");
+            println!("  script    Run a script");
+            println!("  notebook  Run a notebook");
+            println!("  repl      Open kernel REPL");
+            println!("  shell     Open runtime shell");
+            println!("  pkg       Package commands for the active kernel");
+            println!("  pip       Python package tools");
+            println!("  ast       Code outline and execution view");
+        }
+        Some(KernelLanguage::Julia) => {
+            println!("  code      Run code in the active kernel");
+            println!("  script    Run a script");
+            println!("  notebook  Run a notebook");
+            println!("  repl      Open kernel REPL");
+            println!("  shell     Open runtime shell");
+            println!("  pkg       Package commands for the active kernel");
+            println!("  julia     Julia tools");
+        }
+        Some(KernelLanguage::R) => {
+            println!("  code      Run code in the active kernel");
+            println!("  script    Run a script");
+            println!("  notebook  Run a notebook");
+            println!("  repl      Open kernel REPL");
+            println!("  shell     Open runtime shell");
+            println!("  pkg       Package commands for the active kernel");
+            println!("  r         R tools");
+        }
+        _ => {
+            println!("  code      Run code in the active kernel");
+            println!("  script    Run a script");
+            println!("  notebook  Run a notebook");
+            println!("  repl      Open kernel REPL");
+            println!("  shell     Open runtime shell");
+            println!("  pkg       Package commands, if supported");
+            println!();
+            println!("kernel tools adapt after `colab-cli session kernel refresh`");
+        }
+    }
+}
+
 fn load_colab_config(quiet: bool) -> Result<ColabConfig> {
     let config_path = config::config_path()
         .ok()
@@ -402,6 +496,7 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
             _ => "session",
         },
         Some(Commands::Run { command }) => match command {
+            RunCommands::Code { .. } => "run.code",
             RunCommands::Py { .. } => "run.py",
             RunCommands::Script { .. } => "run.script",
             RunCommands::Notebook { .. } => "run.notebook",
@@ -416,6 +511,17 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
                 PipCommands::Tree { .. } => "run.pip.tree",
                 PipCommands::Cache { .. } => "run.pip.cache",
             },
+            RunCommands::Pkg { command } => match command {
+                PkgCommands::Add { .. } => "run.pkg.add",
+                PkgCommands::Remove { .. } => "run.pkg.remove",
+                PkgCommands::List { .. } => "run.pkg.list",
+                PkgCommands::Status { .. } => "run.pkg.status",
+                PkgCommands::Update { .. } => "run.pkg.update",
+                PkgCommands::Restore { .. } => "run.pkg.restore",
+                PkgCommands::Check { .. } => "run.pkg.check",
+            },
+            RunCommands::Julia { .. } => "run.julia",
+            RunCommands::R { .. } => "run.r",
             RunCommands::Ast { .. } => "run.ast",
             RunCommands::Watch { .. } => "run.watch",
             _ => "run",
@@ -442,6 +548,7 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
             Some(StatusCommands::Auth) => "status.auth",
             Some(StatusCommands::Drive) => "status.drive",
             Some(StatusCommands::Fs) => "status.fs",
+            Some(StatusCommands::Kernel { .. }) => "status.kernel",
             Some(StatusCommands::Check) => "status.check",
             Some(StatusCommands::Version) => "status.version",
             _ => "status",
@@ -500,7 +607,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         Some(Commands::Auth { command }) => handle_auth(command, ui, json).await,
         Some(Commands::Session { command }) => {
             let config = load_colab_config(cli.quiet)?;
-            handle_session(command, &config, ui).await
+            handle_session(command, &config, ui, json).await
         }
         Some(Commands::Run { command }) => {
             let config = load_colab_config(cli.quiet)?;
@@ -580,17 +687,17 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
         Some(Commands::CompatNew(args)) => {
             migration(&ui, "colab-cli session new");
             let config = load_colab_config(cli.quiet)?;
-            handle_session(Some(SessionCommands::New(args)), &config, ui).await
+            handle_session(Some(SessionCommands::New(args)), &config, ui, json).await
         }
         Some(Commands::CompatSessions) => {
             migration(&ui, "colab-cli session list");
             let config = load_colab_config(cli.quiet)?;
-            handle_session(Some(SessionCommands::List), &config, ui).await
+            handle_session(Some(SessionCommands::List), &config, ui, json).await
         }
         Some(Commands::CompatStop(arg)) => {
             migration(&ui, "colab-cli session stop");
             let config = load_colab_config(cli.quiet)?;
-            handle_session(Some(SessionCommands::Stop(arg)), &config, ui).await
+            handle_session(Some(SessionCommands::Stop(arg)), &config, ui, json).await
         }
         Some(Commands::CompatUpload(args)) => {
             migration(&ui, "colab-cli fs push LOCAL REMOTE");
@@ -850,7 +957,12 @@ fn handle_auth_add(args: AuthProfileArgs, ui: Ui) -> Result<()> {
     Ok(())
 }
 
-async fn handle_session(cmd: Option<SessionCommands>, config: &ColabConfig, ui: Ui) -> Result<()> {
+async fn handle_session(
+    cmd: Option<SessionCommands>,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+) -> Result<()> {
     match cmd {
         None => handle_session_menu(config, ui).await,
         Some(SessionCommands::New(args)) => {
@@ -901,7 +1013,7 @@ async fn handle_session(cmd: Option<SessionCommands>, config: &ColabConfig, ui: 
         }
         Some(SessionCommands::Logs(args)) => handle_session_logs(config, ui, args).await,
         Some(SessionCommands::Kernel { command }) => {
-            handle_session_kernel(config, ui, command).await
+            handle_session_kernel(config, ui, json, command).await
         }
     }
 }
@@ -1006,96 +1118,584 @@ async fn handle_session_logs(config: &ColabConfig, ui: Ui, args: SessionLogsArgs
 async fn handle_session_kernel(
     config: &ColabConfig,
     ui: Ui,
+    json: bool,
     command: SessionKernelCommands,
 ) -> Result<()> {
     match command {
-        SessionKernelCommands::Status(SessionNameArg { session }) => {
-            let manager = make_manager(config)?;
-            let servers = manager.list_local()?;
-            let server = resolve_server(&servers, session.as_deref())?;
-            validate_runtime_endpoint(server)?;
-            let sessions = drive_jupyter_sessions_with_retry(
-                manager.client(),
-                server,
-                std::time::Duration::from_secs(10),
-                0,
-                &ui,
-                false,
-            )
-            .await?;
-            let kernel = sessions.iter().find(|s| s.kernel.is_some());
-            if let Some(session) = kernel {
-                ui.success(&format!("kernel ready: {}", session.id));
-            } else {
-                println!("kernel unavailable");
-                println!("fix: colab-cli session url --open");
-            }
-            Ok(())
+        SessionKernelCommands::List(KernelSessionArg { session })
+        | SessionKernelCommands::Status(KernelSessionArg { session }) => {
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            let views = load_kernel_views(&manager, &server).await?;
+            print_kernel_list(&views, json, ui)
         }
-        SessionKernelCommands::Interrupt(SessionNameArg { session }) => {
-            let manager = make_manager(config)?;
-            let servers = manager.list_local()?;
-            let server = resolve_server(&servers, session.as_deref())?;
-            let server = ensure_fresh_token(&manager, server, &ui).await?;
-            let sessions = drive_jupyter_sessions_with_retry(
-                manager.client(),
-                &server,
-                std::time::Duration::from_secs(10),
-                0,
+        SessionKernelCommands::Current(KernelSessionArg { session }) => {
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            let view = current_kernel_view(&manager, &server).await?;
+            cache_kernel_view(&manager, &server, &view)?;
+            print_current_kernel(&view, json, ui)
+        }
+        SessionKernelCommands::Select { kernel, session } => {
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            let views = load_kernel_views(&manager, &server).await?;
+            let selected = if let Some(kernel) = kernel {
+                views
+                    .into_iter()
+                    .find(|view| view.id == kernel || view.name == kernel)
+                    .ok_or_else(|| ColabError::config(format!("kernel not found: {kernel}")))?
+            } else if ui.interactive {
+                pick_kernel(views, ui)?
+            } else {
+                return Err(ColabError::config(
+                    "session kernel select needs a kernel id/name outside a TTY",
+                ));
+            };
+            cache_kernel_view(&manager, &server, &selected)?;
+            if json {
+                print_value(true, &selected)
+            } else {
+                kernel_action_progress(
+                    &ui,
+                    "Kernel select",
+                    &[("selected kernel", &selected.name)],
+                );
+                ui.success(&format!("selected kernel {}", selected.name));
+                Ok(())
+            }
+        }
+        SessionKernelCommands::Specs(KernelSessionArg { session }) => {
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            let specs = manager
+                .client()
+                .list_kernelspecs(&server.proxy_url, &server.proxy_token)
+                .await?;
+            print_kernel_specs(&specs, json, ui)
+        }
+        SessionKernelCommands::Start { spec, session } => {
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            kernel_action_progress(&ui, "Kernel start", &[("kernelspec", &spec)]);
+            let kernel = manager
+                .client()
+                .start_kernel(&server.proxy_url, &server.proxy_token, &spec)
+                .await?;
+            let session = session_for_kernel(kernel);
+            let info = detect_kernel_info(manager.client(), &server, &session, None).await;
+            let view = KernelView::from_session(&server, &session, info, true)?;
+            cache_kernel_view(&manager, &server, &view)?;
+            print_current_kernel(&view, json, ui)
+        }
+        SessionKernelCommands::Interrupt(KernelActionArgs { session, yes }) => {
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            let view = current_kernel_view(&manager, &server).await?;
+            if view.state == "busy" && !yes {
+                if !ui.interactive {
+                    return Err(ColabError::config(
+                        "kernel interrupt requires --yes because the kernel is busy",
+                    ));
+                }
+                if !confirm_kernel_action(ui, "Interrupt busy kernel?")? {
+                    return Err(ColabError::config("kernel interrupt cancelled"));
+                }
+            }
+            kernel_action_progress(
                 &ui,
-                false,
-            )
-            .await?;
-            let session = select_drive_kernel(&sessions)?;
-            let kernel_id = session
-                .kernel
-                .as_ref()
-                .map(|kernel| kernel.id.as_str())
-                .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+                "Kernel interrupt",
+                &[("selected kernel", &view.name), ("sending interrupt", "")],
+            );
             manager
                 .client()
                 .kernel_action(
                     &server.proxy_url,
                     &server.proxy_token,
-                    kernel_id,
+                    &view.id,
                     "interrupt",
                 )
                 .await?;
-            println!("kernel interrupted");
-            Ok(())
-        }
-        SessionKernelCommands::Restart { session, yes } => {
-            if !yes {
-                return Err(ColabError::config(
-                    "kernel restart requires --yes; it interrupts running work",
-                ));
+            if json {
+                print_value(
+                    true,
+                    &serde_json::json!({
+                        "ok": true,
+                        "kernel_id": view.id,
+                        "action": "interrupt",
+                        "language": view.language.as_config_value(),
+                        "version": view.version
+                    }),
+                )
+            } else {
+                ui.success("interrupted");
+                Ok(())
             }
-            let manager = make_manager(config)?;
-            let servers = manager.list_local()?;
-            let server = resolve_server(&servers, session.as_deref())?;
-            let server = ensure_fresh_token(&manager, server, &ui).await?;
-            let sessions = drive_jupyter_sessions_with_retry(
-                manager.client(),
-                &server,
-                std::time::Duration::from_secs(10),
-                0,
+        }
+        SessionKernelCommands::Restart {
+            session,
+            yes,
+            timeout,
+        } => {
+            if !yes {
+                if !ui.interactive {
+                    return Err(ColabError::config(
+                        "kernel restart requires --yes; it loses in-kernel state",
+                    ));
+                }
+                if !confirm_kernel_action(ui, "Restart kernel and lose in-kernel state?")? {
+                    return Err(ColabError::config("kernel restart cancelled"));
+                }
+            }
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            let view = current_kernel_view(&manager, &server).await?;
+            kernel_action_progress(
                 &ui,
-                false,
-            )
-            .await?;
-            let session = select_drive_kernel(&sessions)?;
-            let kernel_id = session
-                .kernel
-                .as_ref()
-                .map(|kernel| kernel.id.as_str())
-                .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+                "Kernel restart",
+                &[("selected kernel", &view.name), ("sending restart", "")],
+            );
             manager
                 .client()
-                .kernel_action(&server.proxy_url, &server.proxy_token, kernel_id, "restart")
+                .kernel_action(&server.proxy_url, &server.proxy_token, &view.id, "restart")
                 .await?;
-            println!("kernel restarted");
-            Ok(())
+            let refreshed = wait_for_kernel_ready(&manager, &server, &view.id, timeout).await?;
+            cache_kernel_view(&manager, &server, &refreshed)?;
+            if json {
+                print_value(
+                    true,
+                    &serde_json::json!({
+                        "ok": true,
+                        "kernel_id": refreshed.id,
+                        "action": "restart",
+                        "language": refreshed.language.as_config_value(),
+                        "version": refreshed.version
+                    }),
+                )
+            } else {
+                ui.success(&format!("kernel ready {}", refreshed.language_display()));
+                Ok(())
+            }
         }
+        SessionKernelCommands::Shutdown { session, yes } => {
+            if !yes {
+                if !ui.interactive {
+                    return Err(ColabError::config(
+                        "kernel shutdown requires --yes; it may break the current session",
+                    ));
+                }
+                if !confirm_kernel_action(
+                    ui,
+                    "Shutdown kernel? This may break the current session.",
+                )? {
+                    return Err(ColabError::config("kernel shutdown cancelled"));
+                }
+            }
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            let view = current_kernel_view(&manager, &server).await?;
+            kernel_action_progress(
+                &ui,
+                "Kernel shutdown",
+                &[("selected kernel", &view.name), ("sending shutdown", "")],
+            );
+            manager
+                .client()
+                .shutdown_kernel(&server.proxy_url, &server.proxy_token, &view.id)
+                .await?;
+            mark_kernel_cache_stale(&manager, &server)?;
+            if json {
+                print_value(
+                    true,
+                    &serde_json::json!({ "ok": true, "kernel_id": view.id, "action": "shutdown" }),
+                )
+            } else {
+                ui.success("kernel shut down");
+                Ok(())
+            }
+        }
+        SessionKernelCommands::Refresh(KernelSessionArg { session }) => {
+            let (manager, server) = kernel_server(config, ui, session.as_deref()).await?;
+            kernel_action_progress(
+                &ui,
+                "Kernel refresh",
+                &[("reading kernels", ""), ("reading kernel info", "")],
+            );
+            let view = current_kernel_view(&manager, &server).await?;
+            cache_kernel_view(&manager, &server, &view)?;
+            print_current_kernel(&view, json, ui)
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct KernelView {
+    selected: bool,
+    name: String,
+    language: KernelLanguage,
+    version: Option<String>,
+    state: String,
+    id: String,
+    session_id: String,
+}
+
+impl KernelView {
+    fn from_session(
+        server: &StoredServer,
+        session: &Session,
+        info: KernelInfoSummary,
+        fallback_selected: bool,
+    ) -> Result<Self> {
+        let kernel = session
+            .kernel
+            .as_ref()
+            .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+        let selected = server
+            .selected_kernel_id
+            .as_deref()
+            .map(|id| id == kernel.id)
+            .unwrap_or(fallback_selected);
+        Ok(Self {
+            selected,
+            name: kernel.name.clone().unwrap_or_else(|| "unknown".to_string()),
+            language: info.language,
+            version: info.version,
+            state: kernel
+                .execution_state
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            id: kernel.id.clone(),
+            session_id: session.id.clone(),
+        })
+    }
+
+    fn language_display(&self) -> String {
+        KernelInfoSummary {
+            language: self.language.clone(),
+            version: self.version.clone(),
+        }
+        .display()
+    }
+}
+
+async fn kernel_server(
+    config: &ColabConfig,
+    ui: Ui,
+    session: Option<&str>,
+) -> Result<(ServerManager, StoredServer)> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session)?;
+    validate_runtime_endpoint(server)?;
+    let server = ensure_fresh_token(&manager, server, &ui).await?;
+    Ok((manager, server))
+}
+
+async fn load_kernel_views(
+    manager: &ServerManager,
+    server: &StoredServer,
+) -> Result<Vec<KernelView>> {
+    let specs = manager
+        .client()
+        .list_kernelspecs(&server.proxy_url, &server.proxy_token)
+        .await
+        .ok();
+    let mut sessions = manager
+        .client()
+        .list_sessions_via_tunnel(&server.endpoint)
+        .await?;
+    let api_kernels = manager
+        .client()
+        .list_kernels(&server.proxy_url, &server.proxy_token)
+        .await
+        .unwrap_or_default();
+    for kernel in api_kernels {
+        if !sessions
+            .iter()
+            .any(|session| session.kernel.as_ref().map(|k| &k.id) == Some(&kernel.id))
+        {
+            sessions.push(session_for_kernel(kernel));
+        }
+    }
+
+    let mut views = Vec::new();
+    for (idx, session) in sessions.iter().filter(|s| s.kernel.is_some()).enumerate() {
+        let info = detect_kernel_info(manager.client(), server, session, specs.as_ref()).await;
+        views.push(KernelView::from_session(server, session, info, idx == 0)?);
+    }
+    if views.is_empty() {
+        return Err(ColabError::config(
+            "no running kernels\nfix: colab-cli session url --open",
+        ));
+    }
+    if server.selected_kernel_id.is_some() && !views.iter().any(|view| view.selected) {
+        if let Some(first) = views.first_mut() {
+            first.selected = true;
+        }
+    }
+    Ok(views)
+}
+
+fn session_for_kernel(kernel: JupyterKernel) -> Session {
+    Session {
+        id: uuid::Uuid::new_v4().to_string(),
+        kernel: Some(kernel),
+    }
+}
+
+async fn detect_kernel_info(
+    client: &ColabClient,
+    server: &StoredServer,
+    session: &Session,
+    specs: Option<&KernelSpecResponse>,
+) -> KernelInfoSummary {
+    if let Ok(info) = runner::kernel_info(server, session, std::time::Duration::from_secs(8)).await
+        && !matches!(info.language, KernelLanguage::Unknown(_))
+    {
+        return info;
+    }
+    let kernel_name = session
+        .kernel
+        .as_ref()
+        .and_then(|kernel| kernel.name.as_deref());
+    if let Some(spec) = kernel_name.and_then(|name| specs.and_then(|s| s.kernelspecs.get(name))) {
+        return KernelInfoSummary::from_language_info(spec.spec.language.as_deref(), None);
+    }
+    let _ = client;
+    KernelInfoSummary::from_language_info(kernel_name, None)
+}
+
+async fn current_kernel_view(manager: &ServerManager, server: &StoredServer) -> Result<KernelView> {
+    let mut views = load_kernel_views(manager, server).await?;
+    if let Some(pos) = views.iter().position(|view| view.selected) {
+        Ok(views.remove(pos))
+    } else {
+        Ok(views.remove(0))
+    }
+}
+
+fn cache_kernel_view(
+    manager: &ServerManager,
+    server: &StoredServer,
+    view: &KernelView,
+) -> Result<()> {
+    let mut updated = server.clone();
+    updated.selected_kernel_id = Some(view.id.clone());
+    updated.selected_kernel_name = Some(view.name.clone());
+    updated.kernel_language = Some(view.language.as_config_value());
+    updated.kernel_language_version = view.version.clone();
+    updated.kernel_cache_stale = false;
+    manager.save_local(updated)
+}
+
+fn mark_kernel_cache_stale(manager: &ServerManager, server: &StoredServer) -> Result<()> {
+    let mut updated = server.clone();
+    updated.kernel_cache_stale = true;
+    manager.save_local(updated)
+}
+
+fn print_kernel_list(views: &[KernelView], json: bool, ui: Ui) -> Result<()> {
+    if json {
+        return print_value(true, &views.to_vec());
+    }
+    println!("{}", heading("Kernels", ui));
+    println!();
+    let headers = color_headers(
+        &[
+            "Selected",
+            "Name",
+            "Language",
+            "Version",
+            "State",
+            "Kernel ID",
+        ],
+        ui,
+    );
+    let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
+    let rows: Vec<Vec<String>> = views
+        .iter()
+        .map(|view| {
+            vec![
+                if view.selected {
+                    "●".to_string()
+                } else {
+                    String::new()
+                },
+                view.name.clone(),
+                language_cell(&view.language, ui),
+                view.version.clone().unwrap_or_else(|| "-".to_string()),
+                state_cell(&view.state, ui),
+                crate::cocli::ui::width::truncate_middle(&view.id, 10),
+            ]
+        })
+        .collect();
+    print!(
+        "{}",
+        crate::cocli::ui::table::render_table(
+            &header_refs,
+            &rows,
+            crate::cocli::ui::width::terminal_width()
+        )
+    );
+    Ok(())
+}
+
+fn print_current_kernel(view: &KernelView, json: bool, ui: Ui) -> Result<()> {
+    if json {
+        return print_value(true, view);
+    }
+    println!("{}", heading("Current kernel", ui));
+    println!();
+    println!("  Name       {}", view.name);
+    println!("  Language   {}", view.language_display());
+    println!("  State      {}", view.state);
+    println!(
+        "  Kernel ID  {}",
+        crate::cocli::ui::width::truncate_middle(&view.id, 16)
+    );
+    Ok(())
+}
+
+fn print_kernel_specs(specs: &KernelSpecResponse, json: bool, ui: Ui) -> Result<()> {
+    if json {
+        return print_value(true, specs);
+    }
+    println!("{}", heading("Kernel specs", ui));
+    println!();
+    let headers = color_headers(&["Name", "Display", "Language", "Default"], ui);
+    let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
+    let rows: Vec<Vec<String>> = specs
+        .kernelspecs
+        .iter()
+        .map(|(name, spec)| {
+            vec![
+                name.clone(),
+                spec.spec
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| name.clone()),
+                spec.spec
+                    .language
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
+                yes_no(specs.default.as_deref() == Some(name)).to_string(),
+            ]
+        })
+        .collect();
+    print!(
+        "{}",
+        crate::cocli::ui::table::render_table(
+            &header_refs,
+            &rows,
+            crate::cocli::ui::width::terminal_width()
+        )
+    );
+    Ok(())
+}
+
+fn pick_kernel(views: Vec<KernelView>, ui: Ui) -> Result<KernelView> {
+    print_kernel_list(&views, false, ui)?;
+    println!();
+    println!("↑/↓ move · enter select · esc back · q quit");
+    let choices: Vec<String> = views
+        .iter()
+        .map(|view| format!("{}  {}  {}", view.name, view.language_display(), view.state))
+        .collect();
+    let default = views.iter().position(|view| view.selected).unwrap_or(0);
+    let Some(choice) = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Select kernel")
+        .items(&choices)
+        .default(default)
+        .interact_opt()
+        .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))?
+    else {
+        return Err(ColabError::config("kernel selection cancelled"));
+    };
+    Ok(views[choice].clone())
+}
+
+fn color_headers(headers: &[&str], ui: Ui) -> Vec<String> {
+    headers
+        .iter()
+        .map(|header| {
+            if ui.plain {
+                (*header).to_string()
+            } else {
+                header.cyan().bold().to_string()
+            }
+        })
+        .collect()
+}
+
+fn language_cell(language: &KernelLanguage, ui: Ui) -> String {
+    let text = language.display_name();
+    if ui.plain {
+        return text;
+    }
+    match language {
+        KernelLanguage::Python => text.cyan().to_string(),
+        KernelLanguage::Julia => text.purple().to_string(),
+        KernelLanguage::R => text.green().to_string(),
+        _ => text.dimmed().to_string(),
+    }
+}
+
+fn state_cell(state: &str, ui: Ui) -> String {
+    if ui.plain {
+        return state.to_string();
+    }
+    match state {
+        "idle" => state.green().to_string(),
+        "busy" => state.yellow().to_string(),
+        "starting" => state.cyan().to_string(),
+        "dead" => state.red().to_string(),
+        _ => state.dimmed().to_string(),
+    }
+}
+
+fn confirm_kernel_action(ui: Ui, prompt: &str) -> Result<bool> {
+    if !ui.interactive {
+        return Ok(false);
+    }
+    dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt(prompt)
+        .default(false)
+        .interact()
+        .map_err(|e| ColabError::config(format!("prompt cancelled: {e}")))
+}
+
+fn kernel_action_progress(ui: &Ui, title: &str, rows: &[(&str, &str)]) {
+    if ui.quiet || debug::enabled(1) {
+        return;
+    }
+    println!("{title}");
+    println!("{}", rule(*ui));
+    println!();
+    for (idx, (label, detail)) in rows.iter().enumerate() {
+        let mark = if idx == 0 { "✓" } else { "·" };
+        println!("{mark} {label:<22} {detail}");
+    }
+}
+
+async fn wait_for_kernel_ready(
+    manager: &ServerManager,
+    server: &StoredServer,
+    kernel_id: &str,
+    timeout_secs: u64,
+) -> Result<KernelView> {
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs.max(1));
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(ColabError::config("kernel restart timed out"));
+        }
+        let views = tokio::time::timeout(
+            remaining.min(std::time::Duration::from_secs(5)),
+            load_kernel_views(manager, server),
+        )
+        .await;
+        if let Ok(Ok(mut views)) = views
+            && let Some(view) = views.iter_mut().find(|view| view.id == kernel_id)
+        {
+            view.selected = true;
+            if view.state != "starting" {
+                return Ok(view.clone());
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }
 
@@ -1166,6 +1766,9 @@ async fn handle_run_space(
     json: bool,
 ) -> Result<()> {
     match cmd {
+        RunCommands::Code { session, code } => {
+            handle_run_code(config, ui, session, code, json).await
+        }
         RunCommands::Script {
             script,
             session,
@@ -1216,6 +1819,9 @@ async fn handle_run_space(
             handle_exec(ExecCommands::Shell { session }, config, ui).await
         }
         RunCommands::Pip { command } => handle_run_pip(command, config, ui).await,
+        RunCommands::Pkg { command } => handle_run_pkg(command, config, ui, json).await,
+        RunCommands::Julia { command } => handle_run_julia(command, config, ui, json).await,
+        RunCommands::R { command } => handle_run_r(command, config, ui, json).await,
         RunCommands::Ast { file, json } => {
             require_experiment("AST observer", |cfg| cfg.experiments.ast_observer)?;
             print_code_outline(&file, json)
@@ -1294,7 +1900,40 @@ async fn handle_run_space(
     }
 }
 
+async fn handle_run_code(
+    config: &ColabConfig,
+    ui: Ui,
+    session: Option<String>,
+    code: String,
+    json: bool,
+) -> Result<()> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session.as_deref())?;
+    let server = ensure_fresh_token(&manager, server, &ui).await?;
+    let (_view, kernel_session) = active_kernel_session(&manager, &server).await?;
+    let output = runner::execute_colab_cell_in_session(
+        manager.client(),
+        &server,
+        &kernel_session,
+        &code,
+        std::time::Duration::from_secs(60),
+    )
+    .await?;
+    print_repl_output(&output, json)
+}
+
 async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Result<()> {
+    let session_hint = match &cmd {
+        PipCommands::Install { session, .. }
+        | PipCommands::Freeze { session }
+        | PipCommands::Restore { session, .. }
+        | PipCommands::Check { session }
+        | PipCommands::List { session }
+        | PipCommands::Tree { session }
+        | PipCommands::Cache { session } => session.as_deref(),
+    };
+    ensure_cached_language_allows(config, session_hint, KernelLanguage::Python)?;
     match cmd {
         PipCommands::Install {
             packages,
@@ -1379,6 +2018,231 @@ async fn handle_run_pip(cmd: PipCommands, config: &ColabConfig, ui: Ui) -> Resul
             )
             .await
         }
+    }
+}
+
+async fn handle_run_pkg(cmd: PkgCommands, config: &ColabConfig, ui: Ui, json: bool) -> Result<()> {
+    match cmd {
+        PkgCommands::Add { packages, session } => {
+            run_pkg_action(config, ui, session, "add", packages, json).await
+        }
+        PkgCommands::Remove { packages, session } => {
+            run_pkg_action(config, ui, session, "remove", packages, json).await
+        }
+        PkgCommands::List { session } => {
+            run_pkg_action(config, ui, session, "list", Vec::new(), json).await
+        }
+        PkgCommands::Status { session } => {
+            run_pkg_action(config, ui, session, "status", Vec::new(), json).await
+        }
+        PkgCommands::Update { packages, session } => {
+            run_pkg_action(config, ui, session, "update", packages, json).await
+        }
+        PkgCommands::Restore { file, session } => {
+            run_pkg_action(
+                config,
+                ui,
+                session,
+                "restore",
+                file.into_iter().collect(),
+                json,
+            )
+            .await
+        }
+        PkgCommands::Check { session } => {
+            run_pkg_action(config, ui, session, "check", Vec::new(), json).await
+        }
+    }
+}
+
+async fn handle_run_julia(
+    cmd: JuliaCommands,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+) -> Result<()> {
+    let JuliaCommands::Pkg { command } = cmd;
+    match command {
+        JuliaPkgCommands::Add { packages, session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
+            run_pkg_action(config, ui, session, "add", packages, json).await
+        }
+        JuliaPkgCommands::Status { session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
+            run_pkg_action(config, ui, session, "status", Vec::new(), json).await
+        }
+        JuliaPkgCommands::Instantiate { session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
+            run_pkg_action(config, ui, session, "restore", Vec::new(), json).await
+        }
+        JuliaPkgCommands::Precompile { session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
+            run_pkg_action(config, ui, session, "precompile", Vec::new(), json).await
+        }
+        JuliaPkgCommands::Update { session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
+            run_pkg_action(config, ui, session, "update", Vec::new(), json).await
+        }
+        JuliaPkgCommands::Test { session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
+            run_pkg_action(config, ui, session, "test", Vec::new(), json).await
+        }
+        JuliaPkgCommands::Rm { packages, session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::Julia)?;
+            run_pkg_action(config, ui, session, "remove", packages, json).await
+        }
+    }
+}
+
+async fn handle_run_r(cmd: RCommands, config: &ColabConfig, ui: Ui, json: bool) -> Result<()> {
+    match cmd {
+        RCommands::Pkg { command } => match command {
+            RPkgCommands::Install { packages, session } => {
+                ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
+                run_pkg_action(config, ui, session, "add", packages, json).await
+            }
+            RPkgCommands::List { session } => {
+                ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
+                run_pkg_action(config, ui, session, "list", Vec::new(), json).await
+            }
+            RPkgCommands::Update { session } => {
+                ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
+                run_pkg_action(config, ui, session, "update", Vec::new(), json).await
+            }
+            RPkgCommands::Remove { packages, session } => {
+                ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
+                run_pkg_action(config, ui, session, "remove", packages, json).await
+            }
+        },
+        RCommands::Renv { command } => match command {
+            RenvCommands::Restore { session } => {
+                ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
+                run_pkg_action(config, ui, session, "restore", Vec::new(), json).await
+            }
+            RenvCommands::Snapshot { session } => {
+                ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
+                run_pkg_action(config, ui, session, "snapshot", Vec::new(), json).await
+            }
+        },
+        RCommands::SessionInfo { session } => {
+            ensure_cached_language_allows(config, session.as_deref(), KernelLanguage::R)?;
+            run_pkg_action(config, ui, session, "status", Vec::new(), json).await
+        }
+    }
+}
+
+async fn run_pkg_action(
+    config: &ColabConfig,
+    ui: Ui,
+    session: Option<String>,
+    action: &str,
+    args: Vec<String>,
+    json: bool,
+) -> Result<()> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session.as_deref())?;
+    let server = ensure_fresh_token(&manager, server, &ui).await?;
+    let (view, kernel_session) = active_kernel_session(&manager, &server).await?;
+    let Some(code) = kernel::package_code(&view.language, action, &args) else {
+        return Err(ColabError::config(format!(
+            "package tooling is not available for this kernel\nlanguage: {}\nfix: use `colab-cli run code --code \"...\"`",
+            view.language.display_name()
+        )));
+    };
+    package_progress(&ui, action, &view, &args);
+    let output = runner::execute_colab_cell_in_session(
+        manager.client(),
+        &server,
+        &kernel_session,
+        &code,
+        std::time::Duration::from_secs(600),
+    )
+    .await?;
+    print_repl_output(&output, json)
+}
+
+async fn active_kernel_session(
+    manager: &ServerManager,
+    server: &StoredServer,
+) -> Result<(KernelView, Session)> {
+    let mut sessions = manager
+        .client()
+        .list_sessions_via_tunnel(&server.endpoint)
+        .await?;
+    if sessions.is_empty() {
+        let kernels = manager
+            .client()
+            .list_kernels(&server.proxy_url, &server.proxy_token)
+            .await?;
+        sessions.extend(kernels.into_iter().map(session_for_kernel));
+    }
+    let selected_pos = server
+        .selected_kernel_id
+        .as_ref()
+        .and_then(|id| {
+            sessions
+                .iter()
+                .position(|s| s.kernel.as_ref().map(|k| &k.id) == Some(id))
+        })
+        .unwrap_or(0);
+    let session = sessions.get(selected_pos).cloned().ok_or_else(|| {
+        ColabError::config("no running kernels\nfix: colab-cli session url --open")
+    })?;
+    let info = detect_kernel_info(manager.client(), server, &session, None).await;
+    let view = KernelView::from_session(server, &session, info, true)?;
+    cache_kernel_view(manager, server, &view)?;
+    Ok((view, session))
+}
+
+fn ensure_cached_language_allows(
+    config: &ColabConfig,
+    session: Option<&str>,
+    expected: KernelLanguage,
+) -> Result<()> {
+    let manager = make_manager(config)?;
+    let servers = manager.list_local()?;
+    let server = resolve_server(&servers, session)?;
+    let Some(language) = server
+        .kernel_language
+        .as_deref()
+        .map(KernelLanguage::detect)
+    else {
+        return Ok(());
+    };
+    if std::mem::discriminant(&language) == std::mem::discriminant(&expected) {
+        return Ok(());
+    }
+    let tool = match expected {
+        KernelLanguage::Python => "pip is Python tooling",
+        KernelLanguage::Julia => "Julia package tooling",
+        KernelLanguage::R => "R package tooling",
+        _ => "package tooling",
+    };
+    Err(ColabError::config(format!(
+        "{tool}, but the active kernel is {}\nuse: colab-cli run pkg add <package>",
+        language.display_name()
+    )))
+}
+
+fn package_progress(ui: &Ui, action: &str, view: &KernelView, args: &[String]) {
+    if ui.quiet || debug::enabled(1) {
+        return;
+    }
+    println!("Package {action}");
+    println!("{}", rule(*ui));
+    println!();
+    println!("✓ kernel          {}", view.language_display());
+    let detail = if args.is_empty() {
+        action.to_string()
+    } else {
+        args.join(" ")
+    };
+    match view.language {
+        KernelLanguage::Python => println!("· pip {action:<10} {detail}"),
+        KernelLanguage::Julia => println!("· Pkg.{action:<10} {detail}"),
+        KernelLanguage::R => println!("· R packages      {detail}"),
+        _ => println!("· package action  {detail}"),
     }
 }
 
@@ -1475,6 +2339,7 @@ async fn handle_repl(
         .as_ref()
         .map(|kernel| kernel.id.clone())
         .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+    let info = detect_kernel_info(manager.client(), &server, session, None).await;
 
     if !std::io::stdin().is_terminal() {
         let mut code = String::new();
@@ -1493,12 +2358,9 @@ async fn handle_repl(
         ));
     }
 
-    let version = repl_python_version(manager.client(), &server, session)
-        .await
-        .unwrap_or_else(|| "unknown".to_string());
-    println!("Connected to {} · Python {version}", server.label);
+    println!("Connected to {} · {}", server.label, info.display());
 
-    let mut editor = ReplLineEditor::default();
+    let mut editor = ReplLineEditor::new(info.language.clone());
     loop {
         match editor.read_entry()? {
             ReplInput::Code(code) => {
@@ -1575,24 +2437,6 @@ async fn execute_repl_code(
     }
 }
 
-async fn repl_python_version(
-    client: &ColabClient,
-    server: &StoredServer,
-    session: &Session,
-) -> Option<String> {
-    let output = runner::execute_colab_cell_in_session(
-        client,
-        server,
-        session,
-        "import sys; print(sys.version.split()[0])",
-        std::time::Duration::from_secs(15),
-    )
-    .await
-    .ok()?;
-    let version = output.stdout.trim();
-    (!version.is_empty()).then(|| version.to_string())
-}
-
 fn print_repl_output(output: &runner::CellOutput, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string(output)?);
@@ -1623,17 +2467,31 @@ enum ReplInput {
 #[derive(Default)]
 struct ReplLineEditor {
     history: Vec<String>,
+    language: Option<KernelLanguage>,
 }
 
 impl ReplLineEditor {
+    fn new(language: KernelLanguage) -> Self {
+        Self {
+            history: Vec::new(),
+            language: Some(language),
+        }
+    }
+
     fn read_entry(&mut self) -> Result<ReplInput> {
         let mut lines = Vec::new();
         loop {
-            let prompt = if lines.is_empty() { ">>> " } else { "... " };
+            let language = self.language.clone().unwrap_or(KernelLanguage::Python);
+            let prompt = if lines.is_empty() {
+                language.repl_prompt()
+            } else {
+                language.continuation_prompt()
+            };
             match self.read_line(prompt)? {
                 ReplInput::Code(line) => {
                     lines.push(line);
-                    if python_needs_more_input(&lines) {
+                    if matches!(language, KernelLanguage::Python) && python_needs_more_input(&lines)
+                    {
                         continue;
                     }
                     let code = lines.join("\n");
@@ -2863,6 +3721,53 @@ async fn handle_status(
                 "next_action": "run `colab-cli fs drive status --session NAME`"
             }),
         ),
+        Some(StatusCommands::Kernel {
+            all,
+            refresh,
+            session,
+        }) => {
+            if refresh || all {
+                return handle_session_kernel(
+                    config,
+                    ui,
+                    json,
+                    if all {
+                        SessionKernelCommands::List(KernelSessionArg { session })
+                    } else {
+                        SessionKernelCommands::Current(KernelSessionArg { session })
+                    },
+                )
+                .await;
+            }
+            let manager = make_manager(config)?;
+            let servers = manager.list_local()?;
+            let server = resolve_server(&servers, session.as_deref())?;
+            let language = server
+                .kernel_language
+                .as_deref()
+                .map(KernelLanguage::detect)
+                .unwrap_or_else(|| KernelLanguage::Unknown("unknown".to_string()));
+            let view = KernelView {
+                selected: true,
+                name: server
+                    .selected_kernel_name
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
+                language,
+                version: server.kernel_language_version.clone(),
+                state: if server.kernel_cache_stale {
+                    "stale".to_string()
+                } else {
+                    "cached".to_string()
+                },
+                id: server
+                    .selected_kernel_id
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
+                session_id: server.label.clone(),
+            };
+            print_current_kernel(&view, json, ui)
+        }
         Some(StatusCommands::Slurp { config }) => print_value_or_kv(
             json,
             "recipe",
@@ -4620,7 +5525,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "low",
             false,
             false,
-            "Outline local Python code",
+            "Outline local code",
             &["file"],
             &["imports", "functions", "classes"],
             &["colab-cli run ast file.py --json"],
@@ -4675,6 +5580,97 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             &["Destructive actions require confirmation"],
         ),
     ];
+    rows.extend([
+        skill(
+            "kernel.list",
+            "kernel",
+            "low",
+            true,
+            true,
+            "List running kernels",
+            &["session"],
+            &["kernels"],
+            &["colab-cli session kernel list --json"],
+            &["Read-only"],
+        ),
+        skill(
+            "kernel.select",
+            "kernel",
+            "low",
+            true,
+            true,
+            "Select the active kernel",
+            &["kernel"],
+            &["selection"],
+            &["colab-cli session kernel select python3"],
+            &["No code execution"],
+        ),
+        skill(
+            "kernel.restart",
+            "kernel",
+            "med",
+            true,
+            true,
+            "Restart the selected kernel",
+            &["yes"],
+            &["status"],
+            &["colab-cli session kernel restart --yes --json"],
+            &["Loses in-kernel variables"],
+        ),
+        skill(
+            "kernel.interrupt",
+            "kernel",
+            "low",
+            true,
+            true,
+            "Interrupt running kernel code",
+            &["yes"],
+            &["status"],
+            &["colab-cli session kernel interrupt --json"],
+            &["Stops current execution where supported"],
+        ),
+    ]);
+    if let Some(info) = cached_kernel_language() {
+        match info.language {
+            KernelLanguage::Python => rows.push(skill(
+                "pkg.python",
+                "kernel",
+                "low",
+                true,
+                true,
+                "Run Python package tooling",
+                &["packages"],
+                &["pip_output"],
+                &["colab-cli run pkg add numpy --json"],
+                &["Routes through active Python kernel"],
+            )),
+            KernelLanguage::Julia => rows.push(skill(
+                "pkg.julia",
+                "kernel",
+                "low",
+                true,
+                true,
+                "Run Julia Pkg tooling",
+                &["packages"],
+                &["pkg_output"],
+                &["colab-cli run pkg add CSV --json"],
+                &["Routes through active Julia kernel"],
+            )),
+            KernelLanguage::R => rows.push(skill(
+                "pkg.r",
+                "kernel",
+                "low",
+                true,
+                true,
+                "Run R package tooling",
+                &["packages"],
+                &["package_output"],
+                &["colab-cli run pkg add dplyr --json"],
+                &["Routes through active R kernel"],
+            )),
+            _ => {}
+        }
+    }
     for row in &mut rows {
         if row.name.starts_with("distribute.") {
             row.state = if cfg.experiments.distribute {
@@ -5138,6 +6134,9 @@ fn print_code_outline(path: &str, json: bool) -> Result<()> {
     println!("{}", heading("AST outline", Ui::new(false, false, false)));
     println!("  file            {}", outline.file);
     println!("  kind            {}", outline.kind);
+    if outline.kind.ends_with("-basic") {
+        println!("  parser          basic outline");
+    }
     if outline.cells > 0 {
         println!("  notebook cells  {}", outline.cells);
     }
@@ -5188,6 +6187,10 @@ fn code_outline(path: &str) -> Result<CodeOutline> {
         outline.kind = "notebook".to_string();
         outline.cells = count;
         Ok(outline)
+    } else if path.ends_with(".jl") {
+        Ok(julia_outline(path, &body))
+    } else if path.ends_with(".R") || path.ends_with(".r") {
+        Ok(r_outline(path, &body))
     } else {
         Ok(python_outline(path, &body))
     }
@@ -5240,6 +6243,98 @@ fn python_outline(path: &str, body: &str) -> CodeOutline {
             || trimmed.contains("os.system(")
             || trimmed.contains("subprocess.")
         {
+            push_unique(&mut outline.shell_escapes, trimmed);
+        }
+    }
+    outline
+}
+
+fn julia_outline(path: &str, body: &str) -> CodeOutline {
+    let mut outline = CodeOutline {
+        file: path.to_string(),
+        kind: "julia-basic".to_string(),
+        imports: Vec::new(),
+        functions: Vec::new(),
+        classes: Vec::new(),
+        cells: 0,
+        main_guard: false,
+        top_level_calls: Vec::new(),
+        shell_escapes: Vec::new(),
+        deps: Vec::new(),
+    };
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed
+            .strip_prefix("using ")
+            .or_else(|| trimmed.strip_prefix("import "))
+        {
+            for name in rest.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                push_unique(&mut outline.imports, name);
+                push_unique(&mut outline.deps, name.split('.').next().unwrap_or(name));
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("function ") {
+            push_unique(
+                &mut outline.functions,
+                rest.split('(').next().unwrap_or(rest),
+            );
+        } else if let Some(rest) = trimmed.strip_prefix("struct ") {
+            push_unique(
+                &mut outline.classes,
+                rest.split_whitespace().next().unwrap_or(rest),
+            );
+        } else if let Some(rest) = trimmed.strip_prefix("module ") {
+            push_unique(
+                &mut outline.classes,
+                rest.split_whitespace().next().unwrap_or(rest),
+            );
+        } else if let Some(rest) = trimmed.strip_prefix("macro ") {
+            push_unique(
+                &mut outline.functions,
+                rest.split('(').next().unwrap_or(rest),
+            );
+        }
+        if trimmed.starts_with(';') || trimmed.contains("run(`") {
+            push_unique(&mut outline.shell_escapes, trimmed);
+        }
+    }
+    outline
+}
+
+fn r_outline(path: &str, body: &str) -> CodeOutline {
+    let mut outline = CodeOutline {
+        file: path.to_string(),
+        kind: "r-basic".to_string(),
+        imports: Vec::new(),
+        functions: Vec::new(),
+        classes: Vec::new(),
+        cells: 0,
+        main_guard: false,
+        top_level_calls: Vec::new(),
+        shell_escapes: Vec::new(),
+        deps: Vec::new(),
+    };
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if let Some(name) = trimmed
+            .strip_prefix("library(")
+            .or_else(|| trimmed.strip_prefix("require("))
+            .and_then(|rest| rest.split(')').next())
+        {
+            let name = name.trim_matches(['"', '\'']);
+            push_unique(&mut outline.imports, name);
+            push_unique(&mut outline.deps, name);
+        } else if trimmed.contains("function(") {
+            let name = trimmed
+                .split("<-")
+                .next()
+                .or_else(|| trimmed.split('=').next())
+                .unwrap_or("anonymous")
+                .trim();
+            push_unique(&mut outline.functions, name);
+        } else if trimmed.starts_with("source(") {
+            push_unique(&mut outline.top_level_calls, trimmed);
+        }
+        if trimmed.contains("system(") || trimmed.contains("shell(") {
             push_unique(&mut outline.shell_escapes, trimmed);
         }
     }
@@ -7309,6 +8404,34 @@ mod tests {
     }
 
     #[test]
+    fn julia_outline_is_basic_and_language_specific() {
+        let outline = julia_outline(
+            "main.jl",
+            "using CSV, DataFrames\nmodule M\nstruct Row\nend\nfunction train(x)\nend\n",
+        );
+        assert_eq!(outline.kind, "julia-basic");
+        assert!(outline.imports.contains(&"CSV".to_string()));
+        assert!(outline.classes.contains(&"M".to_string()));
+        assert!(outline.functions.contains(&"train".to_string()));
+    }
+
+    #[test]
+    fn r_outline_is_basic_and_language_specific() {
+        let outline = r_outline(
+            "main.R",
+            "library(dplyr)\ntrain <- function(x) x\nsource('prep.R')\n",
+        );
+        assert_eq!(outline.kind, "r-basic");
+        assert!(outline.imports.contains(&"dplyr".to_string()));
+        assert!(outline.functions.contains(&"train".to_string()));
+        assert!(
+            outline
+                .top_level_calls
+                .contains(&"source('prep.R')".to_string())
+        );
+    }
+
+    #[test]
     fn settings_state_navigates_and_batches_edits() {
         let cfg = config::CocliConfig::default();
         let mut state =
@@ -7442,6 +8565,11 @@ mod tests {
             proxy_token: "redacted".to_string(),
             token_expires_at: chrono::Utc::now(),
             date_assigned: chrono::Utc::now(),
+            selected_kernel_id: None,
+            selected_kernel_name: None,
+            kernel_language: None,
+            kernel_language_version: None,
+            kernel_cache_stale: false,
         };
         let err = drive_endpoint_error(
             "check_jupyter_sessions",

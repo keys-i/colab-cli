@@ -20,9 +20,16 @@ colab-cli session list
 colab-cli session last
 colab-cli session stop --session trainer
 colab-cli session url --session trainer --open
+colab-cli session kernel list --session trainer
+colab-cli session kernel current --session trainer
+colab-cli session kernel select python3 --session trainer
+colab-cli session kernel specs --session trainer
+colab-cli session kernel interrupt --session trainer
+colab-cli session kernel restart --session trainer --yes
 ```
 
 Use `status session` for session details.
+See [kernel.md](kernel.md) for kernel selection and language-aware package tooling.
 
 ## Run
 
@@ -35,12 +42,17 @@ colab-cli run notebook report.ipynb --ast --session trainer
 colab-cli run repl --session trainer
 colab-cli run shell --session trainer
 colab-cli run ast train.py
+colab-cli run code --session trainer --code "1 + 1"
+colab-cli run pkg add numpy pandas --session trainer
+colab-cli run pkg list --session trainer
 colab-cli run pip install torch transformers --session trainer
 colab-cli run pip install -r requirements.txt --session trainer
 colab-cli run pip freeze --session trainer
 colab-cli run pip restore requirements.txt --session trainer
 colab-cli run pip check --session trainer
 colab-cli run pip list --session trainer
+colab-cli run julia pkg add CSV DataFrames --session trainer
+colab-cli run r pkg install dplyr --session trainer
 colab-cli run last --confirm
 ```
 
@@ -51,6 +63,9 @@ colab-cli run last --confirm
 `run repl` uses the attached Jupyter kernel, not a raw remote `python` process.
 `run shell` uses the Colab `/colab/tty` PTY websocket where supported, not
 Jupyter `/api/terminals` by default.
+
+`run pkg` follows the active kernel. `run pip` is Python-specific and is not
+shown as primary help when cached metadata says the active kernel is Julia or R.
 
 ## Fs
 
@@ -93,6 +108,9 @@ colab-cli status runtime --fit llama-7b
 colab-cli status auth
 colab-cli status fs
 colab-cli status drive
+colab-cli status kernel
+colab-cli status kernel --all
+colab-cli status kernel --refresh
 colab-cli status run
 colab-cli status paths
 colab-cli status version

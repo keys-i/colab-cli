@@ -9,6 +9,7 @@ pub mod error;
 pub mod exec;
 pub mod fleet;
 pub mod fs;
+pub mod kernel;
 pub mod mount;
 pub mod release;
 pub mod runtime;

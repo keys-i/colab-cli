@@ -9,14 +9,36 @@ fn parses_major_command_spaces() {
         ["colab-cli", "session", "last"].as_slice(),
         ["colab-cli", "run", "last", "--confirm"].as_slice(),
         ["colab-cli", "run", "py", "--code", "print(1)"].as_slice(),
+        ["colab-cli", "run", "code", "--code", "1 + 1"].as_slice(),
         ["colab-cli", "run", "notebook", "report.ipynb"].as_slice(),
         ["colab-cli", "run", "repl"].as_slice(),
         ["colab-cli", "run", "shell"].as_slice(),
+        ["colab-cli", "run", "pkg", "add", "numpy"].as_slice(),
+        ["colab-cli", "run", "pkg", "remove", "numpy"].as_slice(),
+        ["colab-cli", "run", "pkg", "list"].as_slice(),
+        ["colab-cli", "run", "pkg", "status"].as_slice(),
+        ["colab-cli", "run", "pkg", "update", "numpy"].as_slice(),
+        ["colab-cli", "run", "pkg", "restore", "requirements.txt"].as_slice(),
+        ["colab-cli", "run", "pkg", "check"].as_slice(),
         ["colab-cli", "run", "pip", "install", "torch"].as_slice(),
         ["colab-cli", "run", "pip", "freeze"].as_slice(),
         ["colab-cli", "run", "pip", "restore", "requirements.txt"].as_slice(),
         ["colab-cli", "run", "pip", "check"].as_slice(),
         ["colab-cli", "run", "pip", "list"].as_slice(),
+        ["colab-cli", "run", "julia", "pkg", "add", "CSV"].as_slice(),
+        ["colab-cli", "run", "julia", "pkg", "status"].as_slice(),
+        ["colab-cli", "run", "julia", "pkg", "instantiate"].as_slice(),
+        ["colab-cli", "run", "julia", "pkg", "precompile"].as_slice(),
+        ["colab-cli", "run", "julia", "pkg", "update"].as_slice(),
+        ["colab-cli", "run", "julia", "pkg", "test"].as_slice(),
+        ["colab-cli", "run", "julia", "pkg", "rm", "CSV"].as_slice(),
+        ["colab-cli", "run", "r", "pkg", "install", "dplyr"].as_slice(),
+        ["colab-cli", "run", "r", "pkg", "list"].as_slice(),
+        ["colab-cli", "run", "r", "pkg", "update"].as_slice(),
+        ["colab-cli", "run", "r", "pkg", "remove", "dplyr"].as_slice(),
+        ["colab-cli", "run", "r", "renv", "restore"].as_slice(),
+        ["colab-cli", "run", "r", "renv", "snapshot"].as_slice(),
+        ["colab-cli", "run", "r", "session-info"].as_slice(),
         ["colab-cli", "run", "ast", "file.py"].as_slice(),
         ["colab-cli", "run", "watch", "file.py", "--ast"].as_slice(),
         ["colab-cli", "run", "install", "torch"].as_slice(),
@@ -92,7 +114,25 @@ fn parses_major_command_spaces() {
         ["colab-cli", "session", "reconnect"].as_slice(),
         ["colab-cli", "session", "logs", "--tail", "50"].as_slice(),
         ["colab-cli", "session", "kernel", "status"].as_slice(),
+        ["colab-cli", "session", "kernel", "list"].as_slice(),
+        ["colab-cli", "session", "kernel", "current"].as_slice(),
+        ["colab-cli", "session", "kernel", "select", "python3"].as_slice(),
+        ["colab-cli", "session", "kernel", "specs"].as_slice(),
+        [
+            "colab-cli",
+            "session",
+            "kernel",
+            "start",
+            "--spec",
+            "julia-1.10",
+        ]
+        .as_slice(),
+        ["colab-cli", "session", "kernel", "interrupt"].as_slice(),
         ["colab-cli", "session", "kernel", "restart", "--yes"].as_slice(),
+        ["colab-cli", "session", "kernel", "shutdown", "--yes"].as_slice(),
+        ["colab-cli", "session", "kernel", "refresh"].as_slice(),
+        ["colab-cli", "status", "kernel", "--all"].as_slice(),
+        ["colab-cli", "status", "kernel", "--refresh"].as_slice(),
         ["colab-cli", "settings", "path"].as_slice(),
         ["colab-cli", "settings", "locate"].as_slice(),
     ] {
@@ -288,6 +328,21 @@ fn no_command_shows_launcher_fallback_in_non_tty() {
 }
 
 #[test]
+fn run_help_uses_generic_kernel_tools_without_cache() {
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .args(["run", "--help"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("pkg       Package commands"));
+    assert!(stdout.contains("kernel tools adapt"));
+    assert!(!stdout.contains("pip       Python package tools"));
+}
+
+#[test]
 fn quiet_suppresses_vibe_art() {
     let out = bin().args(["--quiet", "doctor"]).output().unwrap();
     assert!(out.status.success());
@@ -317,6 +372,7 @@ fn docs_exist() {
         "docs/auth.md",
         "docs/logs.md",
         "docs/run.md",
+        "docs/kernel.md",
         "plan.md",
     ] {
         assert!(std::path::Path::new(path).exists(), "{path}");

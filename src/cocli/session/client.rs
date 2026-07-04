@@ -12,8 +12,9 @@ use uuid::Uuid;
 use crate::cocli::config::ColabConfig;
 use crate::cocli::error::{ColabError, Result};
 use crate::cocli::session::model::{
-    Assignment, CcuInfo, ContentsEntry, GetAssignmentResponse, JupyterTerminal,
-    ListAssignmentsResponse, ListedAssignment, Outcome, RuntimeProxyInfo, Session, Shape, Variant,
+    Assignment, CcuInfo, ContentsEntry, GetAssignmentResponse, JupyterKernel, JupyterTerminal,
+    KernelSpecResponse, ListAssignmentsResponse, ListedAssignment, Outcome, RuntimeProxyInfo,
+    Session, Shape, Variant,
 };
 
 const ACCEPT_JSON: &str = "application/json";
@@ -158,6 +159,87 @@ impl ColabClient {
             .colab_request(self.http.get(&url).header(TUNNEL_HEADER, TUNNEL_VALUE))
             .await?;
         self.parse_json(resp).await
+    }
+
+    pub async fn list_kernels(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+    ) -> Result<Vec<JupyterKernel>> {
+        let url = format!("{}/api/kernels", proxy_url.trim_end_matches('/'));
+        crate::cocli::debug::debug2("http request method=GET path=/api/kernels");
+        let resp = self
+            .http
+            .get(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .send()
+            .await?;
+        let resp = self.check_status_raw(resp, &url).await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn list_kernelspecs(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+    ) -> Result<KernelSpecResponse> {
+        let url = format!("{}/api/kernelspecs", proxy_url.trim_end_matches('/'));
+        crate::cocli::debug::debug2("http request method=GET path=/api/kernelspecs");
+        let resp = self
+            .http
+            .get(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .send()
+            .await?;
+        let resp = self.check_status_raw(resp, &url).await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn start_kernel(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+        spec: &str,
+    ) -> Result<JupyterKernel> {
+        let url = format!("{}/api/kernels", proxy_url.trim_end_matches('/'));
+        crate::cocli::debug::debug1(format!("kernel.start spec={spec}"));
+        let resp = self
+            .http
+            .post(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .header(header::ACCEPT, ACCEPT_JSON)
+            .json(&serde_json::json!({ "name": spec }))
+            .send()
+            .await?;
+        let resp = self.check_status_raw(resp, &url).await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn shutdown_kernel(
+        &self,
+        proxy_url: &str,
+        proxy_token: &str,
+        kernel_id: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/api/kernels/{kernel_id}",
+            proxy_url.trim_end_matches('/')
+        );
+        crate::cocli::debug::debug1(format!("kernel.shutdown id={kernel_id}"));
+        let resp = self
+            .http
+            .delete(&url)
+            .header(PROXY_TOKEN_HEADER, proxy_token)
+            .header(CLIENT_AGENT_HEADER, CLIENT_AGENT)
+            .send()
+            .await?;
+        self.check_status_raw(resp, &url).await?;
+        Ok(())
     }
 
     pub async fn delete_session(

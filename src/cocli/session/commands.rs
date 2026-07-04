@@ -57,6 +57,10 @@ impl ServerManager {
         self.storage.list()
     }
 
+    pub fn save_local(&self, server: StoredServer) -> Result<()> {
+        self.storage.upsert(server)
+    }
+
     /// Borrow the inner Colab API client. Lets handlers reuse the
     /// already-built `reqwest::Client` (rustls + http2 + connection
     /// pool) instead of constructing a fresh one per command, which
@@ -171,6 +175,11 @@ impl ServerManager {
             proxy_token: proxy.token.clone(),
             token_expires_at: Utc::now() + Duration::seconds(proxy.token_expires_in_seconds),
             date_assigned: Utc::now(),
+            selected_kernel_id: None,
+            selected_kernel_name: None,
+            kernel_language: None,
+            kernel_language_version: None,
+            kernel_cache_stale: false,
         }
     }
 }

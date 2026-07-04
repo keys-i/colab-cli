@@ -23,6 +23,9 @@ It should make normal Colab work less annoying:
 - [x] `continue` is experimental/off by default
 - [x] `distribute` replaces public `slurp` and `fleet`
 - [x] `run pip` owns package commands
+- [x] `session kernel` owns kernel list/select/specs/current/start/interrupt/restart/shutdown/refresh
+- [x] `run pkg` routes package commands through the cached active kernel language
+- [x] REPL prompt adapts to detected Python, Julia, R, or unknown kernels
 - [x] status is human by default and JSON only with `--json`
 - [x] JSON output has no ANSI in covered tests
 - [x] AST observer is local/read-only and gated

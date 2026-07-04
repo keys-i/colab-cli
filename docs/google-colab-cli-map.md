@@ -7,7 +7,7 @@ Reference: `googlecolab/google-colab-cli`. cocli uses it as a feature reference 
 | `new` / session creation | `colab-cli session new` | implemented | Runtime assignment with retryable Colab errors rendered cleanly. |
 | `sessions` | `colab-cli session list` | implemented | Local store is reconciled when refreshed. |
 | `status` | `colab-cli status`, `status session`, `status runtime` | implemented | Default status is local and cheap. |
-| `restart-kernel` | `colab-cli session kernel restart --yes` | surface added | Command is confirmation-gated; backend implementation is deferred unless a safe Jupyter API path is available. |
+| `restart-kernel` | `colab-cli session kernel restart --yes` | implemented | Uses Jupyter kernel API and is confirmation-gated because it loses in-kernel state. |
 | `stop` | `colab-cli session stop` | implemented | Removes local session and asks Colab to unassign. |
 | `url` | `colab-cli session url --open` | implemented | Opens only when requested. |
 | `run` | `colab-cli run script` | implemented | Runs through the selected runtime. |
@@ -35,6 +35,7 @@ Compatibility aliases stay hidden from normal help. New docs use only the cocli 
 | `colab drivemount` | `colab-cli fs drive mount` | Kernel execution | Runs `google.colab.drive.mount()` in the attached Colab kernel and allows long browser approval time. |
 | `colab log` | `colab-cli session logs` | Local cocli log/export surface | Does not invent unavailable remote logs. |
 | `colab restart-kernel` | `colab-cli session kernel restart --yes` | Jupyter kernel API | Confirmation-gated because it interrupts work. |
+| kernel picker | `colab-cli session kernel list/select/specs/current` | Jupyter kernel/session/kernelspec APIs | cocli caches detected language per local session. |
 
 Related transports:
 

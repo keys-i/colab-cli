@@ -8,7 +8,8 @@ Running `colab-cli` with no command prints help. It does not open a menu.
 
 ```sh
 colab-cli session new --name train --gpu T4
-colab-cli run pip install --session train torch transformers
+colab-cli session kernel refresh --session train
+colab-cli run pkg add --session train torch transformers
 colab-cli run script train.py --session train -- --epochs 3
 colab-cli fs pull /content/checkpoints ./checkpoints
 colab-cli session stop --session train
@@ -77,6 +78,7 @@ colab-cli --json -v status
 ```
 
 Debug lines go to stderr and are redacted. See [Debugging](docs/debugging.md).
+Kernel selection and language-aware packages are covered in [Kernel](docs/kernel.md).
 
 ## Command Space
 
@@ -96,6 +98,10 @@ colab-cli run repl --session trainer
 colab-cli run shell --session trainer
 echo "print('hello')" | colab-cli run repl --session trainer
 echo "echo HELLO" | colab-cli run shell --session trainer
+colab-cli session kernel list --session trainer
+colab-cli session kernel select python3 --session trainer
+colab-cli session kernel restart --session trainer --yes
+colab-cli run pkg add numpy pandas --session trainer
 colab-cli run pip install torch transformers --session trainer
 colab-cli run pip install -r requirements.txt --session trainer
 colab-cli run pip freeze --session trainer

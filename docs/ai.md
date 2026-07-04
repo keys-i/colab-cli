@@ -13,7 +13,13 @@ colab-cli ai explain plan.toml
 colab-cli ai run plan.toml --confirm
 ```
 
-`ai tools list` is read-only and available by default. It lists optional tool surfaces such as `recipe.plan`, `distribute.plan`, `fs.diff`, `ast.outline`, `mcp.tools`, and `ai.audit`.
+`ai tools list` is read-only and available by default. It lists optional tool
+surfaces such as `recipe.plan`, `distribute.plan`, `fs.diff`, `ast.outline`,
+`kernel.list`, `kernel.restart`, `mcp.tools`, and `ai.audit`.
+
+Package tool rows adapt to cached kernel metadata. Python shows `pkg.python`,
+Julia shows `pkg.julia`, and R shows `pkg.r`. The catalog does not list pip as
+an agent tool for Julia or R kernels.
 
 AST observation is shown through `run`:
 

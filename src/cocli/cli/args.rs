@@ -342,18 +342,62 @@ pub struct SessionLogsArgs {
 
 #[derive(Subcommand)]
 pub enum SessionKernelCommands {
-    Status(SessionNameArg),
-    Interrupt(SessionNameArg),
+    List(KernelSessionArg),
+    Current(KernelSessionArg),
+    Select {
+        kernel: Option<String>,
+        #[arg(long, short = 's', alias = "name")]
+        session: Option<String>,
+    },
+    Specs(KernelSessionArg),
+    Start {
+        #[arg(long)]
+        spec: String,
+        #[arg(long, short = 's', alias = "name")]
+        session: Option<String>,
+    },
+    Status(KernelSessionArg),
+    Interrupt(KernelActionArgs),
     Restart {
         #[arg(long, short = 's', alias = "name")]
         session: Option<String>,
         #[arg(long)]
         yes: bool,
+        #[arg(long, default_value_t = 60)]
+        timeout: u64,
     },
+    Shutdown {
+        #[arg(long, short = 's', alias = "name")]
+        session: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
+    Refresh(KernelSessionArg),
+}
+
+#[derive(clap::Args)]
+pub struct KernelSessionArg {
+    #[arg(long, short = 's', alias = "name")]
+    pub session: Option<String>,
+}
+
+#[derive(clap::Args)]
+pub struct KernelActionArgs {
+    #[arg(long, short = 's', alias = "name")]
+    pub session: Option<String>,
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[derive(Subcommand)]
 pub enum RunCommands {
+    /// Run code in the active kernel
+    Code {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+        #[arg(long)]
+        code: String,
+    },
     /// Run a Python script path on the runtime
     #[command(alias = "run")]
     Script {
@@ -397,6 +441,21 @@ pub enum RunCommands {
     Pip {
         #[command(subcommand)]
         command: PipCommands,
+    },
+    /// Package commands for the active kernel
+    Pkg {
+        #[command(subcommand)]
+        command: PkgCommands,
+    },
+    /// Julia tools
+    Julia {
+        #[command(subcommand)]
+        command: JuliaCommands,
+    },
+    /// R tools
+    R {
+        #[command(subcommand)]
+        command: RCommands,
     },
     /// Show a local code outline before execution
     Ast {
@@ -443,6 +502,134 @@ pub enum RunCommands {
     },
     /// Show recent local run commands
     History,
+}
+
+#[derive(Subcommand)]
+pub enum PkgCommands {
+    Add {
+        packages: Vec<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Remove {
+        packages: Vec<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    List {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Status {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Update {
+        packages: Vec<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Restore {
+        file: Option<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Check {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum JuliaCommands {
+    Pkg {
+        #[command(subcommand)]
+        command: JuliaPkgCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum JuliaPkgCommands {
+    Add {
+        packages: Vec<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Status {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Instantiate {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Precompile {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Update {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Test {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Rm {
+        packages: Vec<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RCommands {
+    Pkg {
+        #[command(subcommand)]
+        command: RPkgCommands,
+    },
+    Renv {
+        #[command(subcommand)]
+        command: RenvCommands,
+    },
+    SessionInfo {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RPkgCommands {
+    Install {
+        packages: Vec<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    List {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Update {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Remove {
+        packages: Vec<String>,
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RenvCommands {
+    Restore {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
+    Snapshot {
+        #[arg(long, short = 's')]
+        session: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -747,6 +934,15 @@ pub enum StatusCommands {
     Fs,
     /// Show Drive state
     Drive,
+    /// Show kernel state
+    Kernel {
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        refresh: bool,
+        #[arg(long, alias = "name")]
+        session: Option<String>,
+    },
     /// Compatibility: recipe status moved to `distribute status`.
     #[command(hide = true)]
     Slurp {

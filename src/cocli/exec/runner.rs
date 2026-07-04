@@ -8,6 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite;
 
 use crate::cocli::error::{ColabError, Result};
+use crate::cocli::kernel::KernelInfoSummary;
 use crate::cocli::session::client::ColabClient;
 use crate::cocli::session::model::Session;
 use crate::cocli::session::store::StoredServer;
@@ -159,6 +160,82 @@ pub async fn execute_colab_cell_in_session(
                 == Some("idle")
         {
             return Ok(out);
+        }
+    }
+}
+
+pub async fn kernel_info(
+    server: &StoredServer,
+    session: &Session,
+    timeout: std::time::Duration,
+) -> Result<KernelInfoSummary> {
+    let kernel_id = session
+        .kernel
+        .as_ref()
+        .map(|kernel| kernel.id.as_str())
+        .ok_or_else(|| ColabError::config("kernel unavailable"))?;
+    let ws_url = kernel_ws_url(&server.proxy_url, kernel_id, &session.id);
+    let request = build_ws_request(&ws_url, &server.proxy_token)?;
+    let (ws_stream, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|e| ColabError::oauth(format!("Kernel WebSocket connect failed: {e}")))?;
+    let (mut ws_write, mut ws_read) = ws_stream.split();
+
+    let msg_id = uuid::Uuid::new_v4().to_string();
+    let request = serde_json::json!({
+        "header": {
+            "msg_id": msg_id,
+            "username": "colab-cli",
+            "session": session.id,
+            "date": chrono::Utc::now().to_rfc3339(),
+            "msg_type": "kernel_info_request",
+            "version": "5.3"
+        },
+        "parent_header": {},
+        "metadata": {},
+        "content": {},
+        "channel": "shell"
+    });
+    ws_write
+        .send(tungstenite::Message::Text(request.to_string().into()))
+        .await
+        .map_err(|e| ColabError::oauth(format!("Kernel WebSocket send: {e}")))?;
+
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(KernelInfoSummary::unknown());
+        }
+        let msg = tokio::time::timeout(remaining, ws_read.next()).await;
+        let text = match msg {
+            Ok(Some(Ok(tungstenite::Message::Text(text)))) => text,
+            Ok(Some(Ok(tungstenite::Message::Close(_)))) | Ok(None) => {
+                return Ok(KernelInfoSummary::unknown());
+            }
+            Ok(Some(Err(e))) => return Err(ColabError::oauth(format!("Kernel WebSocket: {e}"))),
+            Err(_) => return Ok(KernelInfoSummary::unknown()),
+            _ => continue,
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_ref()) else {
+            continue;
+        };
+        if value
+            .pointer("/parent_header/msg_id")
+            .and_then(|v| v.as_str())
+            != Some(msg_id.as_str())
+        {
+            continue;
+        }
+        if value.pointer("/header/msg_type").and_then(|v| v.as_str()) == Some("kernel_info_reply") {
+            return Ok(KernelInfoSummary::from_language_info(
+                value
+                    .pointer("/content/language_info/name")
+                    .and_then(|v| v.as_str()),
+                value
+                    .pointer("/content/language_info/version")
+                    .and_then(|v| v.as_str()),
+            ));
         }
     }
 }

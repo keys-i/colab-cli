@@ -5,6 +5,8 @@ The AST observer is experimental and off by default.
 ```sh
 colab-cli settings experiments set ast-observer true
 colab-cli run ast file.py
+colab-cli run ast file.jl
+colab-cli run ast file.R
 colab-cli run ast notebook.ipynb
 colab-cli run watch file.py --ast
 colab-cli ai code explain file.py
@@ -18,6 +20,8 @@ The observer reads local files only. It does not execute code during parsing and
 Current parser:
 
 - Python files
+- Julia files through a basic outline parser
+- R files through a basic outline parser
 - notebook code cells from `.ipynb`
 - imports
 - functions
@@ -27,6 +31,9 @@ Current parser:
 - simple shell escape markers
 - likely package dependencies from imports
 
-This release uses a small local parser instead of Tree-sitter. It is good enough for an outline, not for semantic refactoring. Add Tree-sitter when the AST view needs exact syntax nodes or multi-language support.
+This release uses small local parsers instead of Tree-sitter. Python has the
+most complete outline. Julia and R support imports/packages and top-level
+function/module-style markers only. Add Tree-sitter when the AST view needs
+exact syntax nodes or deeper multi-language support.
 
 JSON output is available with `--json` and contains no ANSI.

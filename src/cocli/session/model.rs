@@ -208,20 +208,51 @@ pub struct ListAssignmentsResponse {
     pub assignments: Vec<ListedAssignment>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Session {
     pub id: String,
     pub kernel: Option<JupyterKernel>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct JupyterKernel {
     pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, rename = "execution_state")]
+    pub execution_state: Option<String>,
+    #[serde(default)]
+    pub connections: Option<u32>,
+    #[serde(default)]
+    pub last_activity: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct JupyterTerminal {
     pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KernelSpecResponse {
+    #[serde(default)]
+    pub default: Option<String>,
+    #[serde(default)]
+    pub kernelspecs: std::collections::BTreeMap<String, KernelSpecEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KernelSpecEntry {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub spec: KernelSpec,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KernelSpec {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 /// Jupyter Contents API entry. Returned by `GET /api/contents/<path>`.

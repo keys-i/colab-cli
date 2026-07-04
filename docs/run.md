@@ -24,7 +24,16 @@ mode only after the websocket connects and restores the terminal on exit. In
 piped mode cocli forwards stdin, sends `exit\n`, waits briefly for output, and
 closes the websocket so scripts do not hang forever.
 
-Package commands live under `run pip`:
+Generic package commands follow the selected kernel:
+
+```sh
+colab-cli run pkg add numpy pandas --session trainer
+colab-cli run pkg list --session trainer
+colab-cli run pkg update --session trainer
+colab-cli run pkg restore requirements.txt --session trainer
+```
+
+For Python kernels, advanced package commands live under `run pip`:
 
 ```sh
 colab-cli run pip install torch transformers --session trainer
@@ -34,6 +43,19 @@ colab-cli run pip restore requirements.txt --session trainer
 colab-cli run pip check --session trainer
 colab-cli run pip list --session trainer
 ```
+
+For Julia and R kernels:
+
+```sh
+colab-cli run julia pkg add CSV DataFrames --session trainer
+colab-cli run julia pkg status --session trainer
+colab-cli run r pkg install dplyr --session trainer
+colab-cli run r renv restore --session trainer
+```
+
+If cached kernel metadata says the active kernel is Julia or R, `run pip` is
+blocked with a short wrong-language error. Use `run pkg` for portable package
+commands.
 
 AST observer placement:
 
