@@ -3,12 +3,12 @@
 Drive lives under `fs` because it changes the runtime filesystem.
 
 ```sh
-colab-cli fs drive mount --session trainer
-colab-cli fs drive mount --session trainer --timeout 600 --preflight-timeout 10 --retries 2
-colab-cli fs drive status --session trainer
-colab-cli fs drive list --session trainer
-colab-cli fs drive unmount --session trainer
-colab-cli fs drive path --session trainer
+colab fs drive mount --session trainer
+colab fs drive mount --session trainer --timeout 600 --preflight-timeout 10 --retries 2
+colab fs drive status --session trainer
+colab fs drive list --session trainer
+colab fs drive unmount --session trainer
+colab fs drive path --session trainer
 ```
 
 ## Mount Flow
@@ -35,8 +35,8 @@ Runtime endpoint is not reachable
 stage: check_jupyter_sessions
 retryable: yes
 
-fix: colab-cli session list --refresh
-     colab-cli session new --name work
+fix: colab session list --refresh
+     colab session new --name work
 
 Use --verbose to see the request details
 ```
@@ -65,7 +65,7 @@ Drive mount failed
 Drive mount needs a Colab kernel session, not a plain Python process
 stage: verify_kernel_context
 
-fix: colab-cli session url --open
+fix: colab session url --open
 ```
 
 Open the session URL once, approve Drive in the browser if Colab asks, then run the mount command again.
@@ -75,7 +75,7 @@ Open the session URL once, approve Drive in the browser if Colab asks, then run 
 Drive auth can require browser approval. Use:
 
 ```sh
-colab-cli fs drive mount --session trainer --open
+colab fs drive mount --session trainer --open
 ```
 
 The default mount timeout is 600 seconds because Drive approval can involve a browser step. Endpoint preflight stays short at 10 seconds. If approval is still pending at the timeout, cocli exits with a next action instead of dumping a Python traceback.
@@ -86,22 +86,22 @@ Some Colab Enterprise setups do not support `google.colab.drive.mount()`. cocli 
 
 ```text
 Drive mount is not supported for this runtime
-next: colab-cli status check
+next: colab status check
 ```
 
 Verbose mode can show the raw traceback when it is needed for debugging:
 
 ```sh
-colab-cli --verbose fs drive mount --session trainer
+colab --verbose fs drive mount --session trainer
 ```
 
 ## Recovery Commands
 
 ```sh
-colab-cli session refresh
-colab-cli session repair --session trainer
-colab-cli session reconnect --session trainer
-colab-cli session last
+colab session refresh
+colab session repair --session trainer
+colab session reconnect --session trainer
+colab session last
 ```
 
 These commands help detect stale local endpoint records. They do not create hidden runtimes or bypass Colab limits.

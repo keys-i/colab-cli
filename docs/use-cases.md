@@ -3,8 +3,8 @@
 ## Remote Python REPL
 
 ```sh
-colab-cli session new
-colab-cli run repl
+colab session new
+colab run repl
 ```
 
 Expected:
@@ -17,7 +17,7 @@ Expected:
 ## Remote Bash Shell
 
 ```sh
-colab-cli run shell
+colab run shell
 ```
 
 Expected:
@@ -31,7 +31,7 @@ Expected:
 ## Pipe One Shell Command
 
 ```sh
-echo 'echo HELLO' | colab-cli run shell
+echo 'echo HELLO' | colab run shell
 ```
 
 Expected:
@@ -43,7 +43,7 @@ Expected:
 ## Mount Drive
 
 ```sh
-colab-cli fs drive mount
+colab fs drive mount
 ```
 
 Expected:
@@ -56,7 +56,7 @@ Expected:
 ## Expired Runtime Endpoint
 
 ```sh
-colab-cli fs drive mount
+colab fs drive mount
 ```
 
 Expected:
@@ -68,7 +68,7 @@ Expected:
 ## Change Several Settings
 
 ```sh
-colab-cli settings
+colab settings
 ```
 
 Expected:
@@ -81,7 +81,7 @@ Expected:
 ## Scripting
 
 ```sh
-colab-cli status --json
+colab status --json
 ```
 
 Expected:

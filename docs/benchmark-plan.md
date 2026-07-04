@@ -16,9 +16,9 @@ Rules:
 
 | Scenario | Baseline | Command | Metric |
 |---|---|---|---|
-| Startup | google-colab-cli help if installed | `colab-cli --help` | wall time |
-| Status quick | manual diagnosis | `colab-cli --json status quick` | time, output lines |
-| File sync dry-run | manual upload/download | `colab-cli --json fs sync DIR /content/dir --dry-run` | time, JSON cleanliness |
+| Startup | google-colab-cli help if installed | `colab --help` | wall time |
+| Status quick | manual diagnosis | `colab --json status quick` | time, output lines |
+| File sync dry-run | manual upload/download | `colab --json fs sync DIR /content/dir --dry-run` | time, JSON cleanliness |
 | Manifest diff 10k | naive full scan | `cargo bench --bench manifest` | diff time |
 | Command parse | clap parser path | `cargo bench --bench hot_paths command_parse_smoke` | parse time |
 

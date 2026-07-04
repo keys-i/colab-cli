@@ -4,15 +4,15 @@ Reference checked: `googlecolab/colabtools` local checkout under `colabtools/`. 
 
 | Colabtools feature | CLI equivalent | Status | Reason |
 |---|---|---|---|
-| `google.colab.drive.mount` | `colab-cli fs drive mount` | wrapped through kernel cell | Drive mount needs Colab kernel/browser approval. CLI shows progress and maps common failures. |
-| `google.colab.drive.flush_and_unmount` | `colab-cli fs drive unmount` | wrapped through kernel cell | CLI exposes Drive lifecycle without copying internals. |
-| Drive mount status | `colab-cli fs drive status` | implemented | Checks mounted state through the selected session. |
-| `google.colab.auth.authenticate_user` | `colab-cli auth login` | CLI equivalent exists | CLI auth uses profile commands and redacted status. |
-| auth status/export | `colab-cli auth status`, `auth export-redacted` | implemented | Secrets are redacted by default. |
-| `google.colab.files.upload/download` | `colab-cli fs push`, `fs pull`, `fs sync`, `fs changed` | CLI equivalent exists | Terminal file transfer is explicit path-based, not browser picker based. |
-| output/log capture | `colab-cli run ...`, `logs/export` where available | implemented/deferred by command | Run output streams normally; richer log export is kept as explicit support work. |
-| runtime/backend info | `colab-cli status runtime --backend`, `--versions`, `--gpu`, `--tpu` | implemented | Uses public runtime/session surfaces. Backend package snapshots are reference data only. |
-| notebook execution | `colab-cli run notebook` | implemented | Runs notebooks through the selected runtime path. |
+| `google.colab.drive.mount` | `colab fs drive mount` | wrapped through kernel cell | Drive mount needs Colab kernel/browser approval. CLI shows progress and maps common failures. |
+| `google.colab.drive.flush_and_unmount` | `colab fs drive unmount` | wrapped through kernel cell | CLI exposes Drive lifecycle without copying internals. |
+| Drive mount status | `colab fs drive status` | implemented | Checks mounted state through the selected session. |
+| `google.colab.auth.authenticate_user` | `colab auth login` | CLI equivalent exists | CLI auth uses profile commands and redacted status. |
+| auth status/export | `colab auth status`, `auth export-redacted` | implemented | Secrets are redacted by default. |
+| `google.colab.files.upload/download` | `colab fs upload`, `fs download`, `fs sync`, `fs changed` | CLI equivalent exists | Terminal file transfer is explicit path-based, not browser picker based. |
+| output/log capture | `colab run ...`, `logs/export` where available | implemented/deferred by command | Run output streams normally; richer log export is kept as explicit support work. |
+| runtime/backend info | `colab status runtime --backend`, `--versions`, `--gpu`, `--tpu` | implemented | Uses public runtime/session surfaces. Backend package snapshots are reference data only. |
+| notebook execution | `colab run notebook` | implemented | Runs notebooks through the selected runtime path. |
 | user data/secrets | `settings support bug-report`, redaction, future secrets check | partial | CLI must not print secret values. Only redacted checks are appropriate. |
 | forms/widgets | none | not applicable outside notebook UI | Terminal widgets would be fake unless backed by a real CLI workflow. |
 | JavaScript/browser helpers | none | not applicable outside notebook UI | Browser-only APIs stay in notebooks. |

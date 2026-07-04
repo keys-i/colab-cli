@@ -3,14 +3,14 @@
 MCP support is disabled by default.
 
 ```sh
-colab-cli ai mcp
-colab-cli ai mcp serve --stdio
+colab ai mcp
+colab ai mcp serve --stdio
 ```
 
 Enable the experiment first:
 
 ```sh
-colab-cli settings experiments set mcp-server true
+colab settings experiments set mcp-server true
 ```
 
 The current build exposes the tool catalog, but the stdio MCP server is not implemented yet. When requested it reports:

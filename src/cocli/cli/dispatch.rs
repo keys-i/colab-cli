@@ -12,12 +12,12 @@ use crate::cocli::cli::{
     DistributeCommands, DistributePoolCommands, DistributeRecipeCommands, DistributeRunArgs,
     DistributeShardCommands, EnvCommands, ExecCommands, FileCommands, FleetCommands,
     FleetConfigArgs, FsCommands, FsDiffArgs, FsDriveCommands, FsSyncArgs, JuliaCommands,
-    JuliaPkgCommands, KernelActionArgs, KernelSessionArg, MountCommands, PipCommands, PkgCommands,
-    RCommands, RPkgCommands, RenvCommands, RunCommands, RuntimeCommands, ServerCommands,
-    SessionCommands, SessionKernelCommands, SessionLogsArgs, SessionNameArg, SessionNewArgs,
-    SettingsBillingCommands, SettingsCommands, SettingsExperimentsCommands, SettingsUiCommands,
-    SettingsUpdateCommands, SkillCommands, SlurpCommands, StatusCommands, SupportCommands,
-    ToolsCommands,
+    JuliaPkgCommands, KernelActionArgs, KernelSessionArg, LogCommands, MountCommands, PipCommands,
+    PkgCommands, RCommands, RPkgCommands, RenvCommands, RunCommands, RuntimeCommands,
+    ServerCommands, SessionCommands, SessionKernelCommands, SessionLogsArgs, SessionNameArg,
+    SessionNewArgs, SettingsBillingCommands, SettingsCommands, SettingsExperimentsCommands,
+    SettingsUiCommands, SettingsUpdateCommands, SkillCommands, SlurpCommands, StatusCommands,
+    SupportCommands, ToolsCommands,
 };
 #[cfg(any(feature = "dev-tools", feature = "owner-tools"))]
 use crate::cocli::cli::{DevCommands, ReleaseCommands};
@@ -75,10 +75,10 @@ pub async fn main_entry() {
         if !json_mode {
             match &e {
                 ColabError::NotAuthenticated => {
-                    eprintln!("  Run `colab-cli auth login` to sign in.");
+                    eprintln!("  Run `colab auth login` to sign in.");
                 }
                 ColabError::TooManyAssignments => {
-                    eprintln!("  Run `colab-cli session stop --name NAME` to remove one.");
+                    eprintln!("  Run `colab session stop --name NAME` to remove one.");
                 }
                 _ => {}
             }
@@ -93,13 +93,14 @@ fn maybe_print_dynamic_run_help() -> bool {
     let Some(pos) = args.iter().position(|arg| arg == "run") else {
         return false;
     };
-    if !args[pos + 1..]
-        .iter()
-        .any(|arg| arg == "--help" || arg == "-h")
+    let after_run = &args[pos + 1..];
+    if !after_run
+        .first()
+        .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         return false;
     }
-    if args[pos + 1..]
+    if after_run
         .iter()
         .any(|arg| arg == "pip" || arg == "pkg" || arg == "julia" || arg == "r")
     {
@@ -281,8 +282,8 @@ fn error_kind(e: &ColabError) -> &'static str {
 
 fn error_next_action(e: &ColabError) -> Option<&'static str> {
     match e {
-        ColabError::NotAuthenticated => Some("colab-cli auth login"),
-        ColabError::TooManyAssignments => Some("colab-cli session stop --name NAME"),
+        ColabError::NotAuthenticated => Some("colab auth login"),
+        ColabError::TooManyAssignments => Some("colab session stop --name NAME"),
         _ => None,
     }
 }
@@ -328,11 +329,11 @@ fn api_message(status: u16, url: &str) -> &'static str {
 
 fn api_fix(status: u16, url: &str) -> Option<&'static str> {
     if url.contains("/assign") && retryable_status(status) && url.contains("shape=hm") {
-        Some("run again with Standard RAM: colab-cli session new --shape standard")
+        Some("run again with Standard RAM: colab session new --shape standard")
     } else if url.contains("/assign") && retryable_status(status) {
         Some("try again in a minute")
     } else if status == 401 || status == 403 {
-        Some("run colab-cli auth login")
+        Some("run colab auth login")
     } else {
         None
     }
@@ -419,7 +420,7 @@ fn cached_kernel_language() -> Option<KernelInfoSummary> {
 fn print_run_help_for_language(language: Option<&KernelLanguage>) {
     println!("Run code and prepare runtimes");
     println!();
-    println!("Usage: colab-cli run <COMMAND>");
+    println!("Usage: colab run <COMMAND>");
     println!();
     println!("Commands:");
     match language {
@@ -459,7 +460,7 @@ fn print_run_help_for_language(language: Option<&KernelLanguage>) {
             println!("  shell     Open runtime shell");
             println!("  pkg       Package commands, if supported");
             println!();
-            println!("kernel tools adapt after `colab-cli session kernel refresh`");
+            println!("kernel tools adapt after `colab session kernel refresh`");
         }
     }
 }
@@ -528,6 +529,8 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
         },
         Some(Commands::Fs { command }) => match command {
             FsCommands::Ls { .. } => "fs.ls",
+            FsCommands::Upload { .. } => "fs.upload",
+            FsCommands::Download { .. } => "fs.download",
             FsCommands::Push { .. } => "fs.push",
             FsCommands::Pull { .. } => "fs.pull",
             FsCommands::Rm { .. } => "fs.rm",
@@ -552,6 +555,13 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
             Some(StatusCommands::Check) => "status.check",
             Some(StatusCommands::Version) => "status.version",
             _ => "status",
+        },
+        Some(Commands::Log { command, .. }) => match command {
+            Some(LogCommands::List { .. }) => "log.list",
+            Some(LogCommands::Show { .. }) => "log.show",
+            Some(LogCommands::Export { .. }) => "log.export",
+            Some(LogCommands::Tail { .. }) => "log.tail",
+            None => "log",
         },
         Some(Commands::Ai { command }) => match command {
             Some(AiCommands::Tools { .. }) => "ai.tools",
@@ -588,6 +598,9 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
         },
         Some(Commands::Continue { .. }) => "continue",
         Some(Commands::Distribute { .. }) => "distribute",
+        Some(Commands::Update { .. }) => "update",
+        Some(Commands::Version) => "version",
+        Some(Commands::Pay { .. }) => "pay",
         Some(Commands::Completions { .. }) => "completions",
         _ => "compat",
     }
@@ -596,7 +609,7 @@ fn command_namespace(command: &Option<Commands>) -> &'static str {
 async fn run(cli: Cli, ui: Ui) -> Result<()> {
     if let Some(Commands::Completions { shell }) = &cli.command {
         let mut cmd = Cli::command();
-        clap_complete::generate(*shell, &mut cmd, "colab-cli", &mut std::io::stdout());
+        clap_complete::generate(*shell, &mut cmd, "colab", &mut std::io::stdout());
         return Ok(());
     }
 
@@ -614,7 +627,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_run_space(command, &config, ui, cli.json).await
         }
         Some(Commands::Exec { command }) => {
-            migration(&ui, "colab-cli run ...");
+            migration(&ui, "colab run ...");
             let config = load_colab_config(cli.quiet)?;
             handle_exec(command, &config, ui).await
         }
@@ -628,7 +641,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_mount(command, &config, ui, json).await
         }
         Some(Commands::Env { command }) => {
-            migration(&ui, "colab-cli run install/freeze/restore");
+            migration(&ui, "colab run pip install/freeze/restore");
             let config = load_colab_config(cli.quiet)?;
             handle_env(command, &config, ui).await
         }
@@ -641,23 +654,45 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             let config = load_colab_config(cli.quiet)?;
             handle_status(command, &config, ui, json).await
         }
+        Some(Commands::Log {
+            command,
+            session,
+            tail,
+            format,
+            out,
+        }) => {
+            let config = load_colab_config(cli.quiet)?;
+            handle_log(
+                command,
+                &config,
+                ui,
+                json,
+                LogDefaults {
+                    session,
+                    tail,
+                    format,
+                    out,
+                },
+            )
+            .await
+        }
         Some(Commands::Tools { command }) => {
-            migration(&ui, "colab-cli ai tools ...");
+            migration(&ui, "colab ai tools ...");
             handle_tools(command, ui, json)
         }
         Some(Commands::Fleet { command }) => {
-            migration(&ui, "colab-cli distribute pool ...");
+            migration(&ui, "colab distribute pool ...");
             handle_fleet(command, ui, json)
         }
         Some(Commands::Distribute { command }) => handle_distribute(command, ui, json),
         Some(Commands::Ai { command }) => handle_ai(command, ui, json),
         Some(Commands::Slurp { command }) => {
-            migration(&ui, "colab-cli distribute recipe ...");
+            migration(&ui, "colab distribute recipe ...");
             require_experiment("distribute", |cfg| cfg.experiments.distribute)?;
             handle_slurp(command, ui, json)
         }
         Some(Commands::Agent { command }) => {
-            migration(&ui, "colab-cli ai ...");
+            migration(&ui, "colab ai ...");
             handle_agent(command, ui, json)
         }
         Some(Commands::Continue { command }) => {
@@ -671,7 +706,7 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_config(command, json)
         }
         Some(Commands::Doctor { .. }) => {
-            migration(&ui, "colab-cli status check");
+            migration(&ui, "colab status check");
             let config = load_colab_config(cli.quiet)?;
             handle_status(Some(StatusCommands::Check), &config, ui, json).await
         }
@@ -685,34 +720,34 @@ async fn run(cli: Cli, ui: Ui) -> Result<()> {
             handle_file(command, &config, ui).await
         }
         Some(Commands::CompatNew(args)) => {
-            migration(&ui, "colab-cli session new");
+            migration(&ui, "colab session new");
             let config = load_colab_config(cli.quiet)?;
             handle_session(Some(SessionCommands::New(args)), &config, ui, json).await
         }
         Some(Commands::CompatSessions) => {
-            migration(&ui, "colab-cli session list");
+            migration(&ui, "colab session list");
             let config = load_colab_config(cli.quiet)?;
             handle_session(Some(SessionCommands::List), &config, ui, json).await
         }
         Some(Commands::CompatStop(arg)) => {
-            migration(&ui, "colab-cli session stop");
+            migration(&ui, "colab session stop");
             let config = load_colab_config(cli.quiet)?;
             handle_session(Some(SessionCommands::Stop(arg)), &config, ui, json).await
         }
         Some(Commands::CompatUpload(args)) => {
-            migration(&ui, "colab-cli fs push LOCAL REMOTE");
+            migration(&ui, "colab fs upload LOCAL REMOTE");
             let config = load_colab_config(cli.quiet)?;
             compat_transfer(args, true, &config, ui).await
         }
         Some(Commands::CompatDownload(args)) => {
-            migration(&ui, "colab-cli fs pull REMOTE LOCAL");
+            migration(&ui, "colab fs download REMOTE LOCAL");
             let config = load_colab_config(cli.quiet)?;
             compat_transfer(args, false, &config, ui).await
         }
-        Some(Commands::CompatLog(args)) => {
-            migration(&ui, "colab-cli session logs");
-            let config = load_colab_config(cli.quiet)?;
-            handle_session_logs(&config, ui, args).await
+        Some(Commands::Update { install, yes }) => handle_update(install, yes, json),
+        Some(Commands::Version) => print_version_info(json),
+        Some(Commands::Pay { dry_run }) => {
+            handle_settings_billing(SettingsBillingCommands::Open { dry_run }, json)
         }
         Some(Commands::Completions { .. }) => unreachable!(),
     }
@@ -893,7 +928,7 @@ async fn handle_auth(cmd: AuthCommands, ui: Ui, json: bool) -> Result<()> {
                 "name": profile.name,
                 "kind": profile.kind.to_string(),
                 "auto_fallback": false,
-                "note": "colab-cli never switches accounts automatically to work around limits"
+                "note": "colab never switches accounts automatically to work around limits"
             });
             print_value(json, &data)
         }
@@ -985,7 +1020,7 @@ async fn handle_session(
         }
         Some(SessionCommands::List) => handle_ls(config, ui).await,
         Some(SessionCommands::Status(SessionNameArg { session })) => {
-            migration(&ui, "colab-cli status session --name NAME");
+            migration(&ui, "colab status session --name NAME");
             handle_info(config, ui, session).await
         }
         Some(SessionCommands::Stop(SessionNameArg { session })) => {
@@ -999,7 +1034,7 @@ async fn handle_session(
                 .iter()
                 .max_by_key(|s| s.date_assigned)
                 .ok_or_else(|| {
-                    ColabError::config("no active session - run `colab-cli session list`")
+                    ColabError::config("no active session - run `colab session list`")
                 })?;
             ui.print_server_status(last);
             Ok(())
@@ -1071,7 +1106,7 @@ async fn handle_session_reconnect(
     match handle_session_repair(config, ui, session).await {
         Ok(()) => Ok(()),
         Err(_) => Err(ColabError::config(
-            "could not reconnect this local session to an active Colab runtime\nfix: colab-cli session list --refresh\n     colab-cli session new --name work",
+            "could not reconnect this local session to an active Colab runtime\nfix: colab session list --refresh\n     colab session new --name work",
         )),
     }
 }
@@ -1086,7 +1121,7 @@ async fn handle_session_logs(config: &ColabConfig, ui: Ui, args: SessionLogsArgs
         "format": args.format,
         "available": false,
         "logs": [],
-        "note": "execution history is captured for commands run through colab-cli; this session has no persisted log stream"
+        "note": "execution history is captured for commands run through colab; this session has no persisted log stream"
     });
     let body = match args.format.as_str() {
         "jsonl" => format!("{}\n", serde_json::to_string(&data)?),
@@ -1113,6 +1148,119 @@ async fn handle_session_logs(config: &ColabConfig, ui: Ui, args: SessionLogsArgs
         print!("{body}");
     }
     Ok(())
+}
+
+struct LogDefaults {
+    session: Option<String>,
+    tail: usize,
+    format: String,
+    out: Option<String>,
+}
+
+async fn handle_log(
+    command: Option<LogCommands>,
+    config: &ColabConfig,
+    ui: Ui,
+    json: bool,
+    defaults: LogDefaults,
+) -> Result<()> {
+    match command {
+        None if defaults.session.is_some()
+            || defaults.out.is_some()
+            || defaults.format != "text"
+            || defaults.tail != 50 =>
+        {
+            handle_session_logs(
+                config,
+                ui,
+                SessionLogsArgs {
+                    session: defaults.session,
+                    tail: defaults.tail,
+                    format: defaults.format,
+                    out: defaults.out,
+                },
+            )
+            .await
+        }
+        None | Some(LogCommands::List { session: None }) => {
+            let manager = make_manager(config)?;
+            let servers = manager.list_local().unwrap_or_default();
+            if json {
+                let rows: Vec<_> = servers
+                    .iter()
+                    .map(|server| {
+                        serde_json::json!({
+                            "session": server.label,
+                            "available": false,
+                            "note": "no persisted log stream"
+                        })
+                    })
+                    .collect();
+                return print_value(true, &rows);
+            }
+            println!("{}", heading("Log", ui));
+            println!("Session history");
+            println!();
+            if servers.is_empty() {
+                println!("No session history recorded yet.");
+                return Ok(());
+            }
+            println!("{:<24} {:<10} Note", "Session", "Available");
+            for server in servers {
+                println!("{:<24} {:<10} no persisted log stream", server.label, "no");
+            }
+            Ok(())
+        }
+        Some(LogCommands::List {
+            session: Some(session),
+        }) => {
+            handle_session_logs(
+                config,
+                ui,
+                SessionLogsArgs {
+                    session: Some(session),
+                    tail: defaults.tail,
+                    format: defaults.format,
+                    out: defaults.out,
+                },
+            )
+            .await
+        }
+        Some(LogCommands::Show { session, tail })
+        | Some(LogCommands::Tail {
+            session,
+            lines: tail,
+        }) => {
+            handle_session_logs(
+                config,
+                ui,
+                SessionLogsArgs {
+                    session,
+                    tail,
+                    format: "text".to_string(),
+                    out: None,
+                },
+            )
+            .await
+        }
+        Some(LogCommands::Export {
+            session,
+            format,
+            out,
+        }) => {
+            handle_session_logs(
+                config,
+                ui,
+                SessionLogsArgs {
+                    session,
+                    tail: defaults.tail,
+                    format,
+                    out,
+                },
+            )
+            .await
+        }
+    }
 }
 
 async fn handle_session_kernel(
@@ -1417,7 +1565,7 @@ async fn load_kernel_views(
     }
     if views.is_empty() {
         return Err(ColabError::config(
-            "no running kernels\nfix: colab-cli session url --open",
+            "no running kernels\nfix: colab session url --open",
         ));
     }
     if server.selected_kernel_id.is_some() && !views.iter().any(|view| view.selected) {
@@ -1739,7 +1887,7 @@ async fn handle_session_menu(config: &ColabConfig, ui: Ui) -> Result<()> {
                     .iter()
                     .max_by_key(|s| s.date_assigned)
                     .ok_or_else(|| {
-                        ColabError::config("no active session - run `colab-cli session list`")
+                        ColabError::config("no active session - run `colab session list`")
                     })?;
                 ui.print_server_status(last);
                 Ok(())
@@ -1852,7 +2000,7 @@ async fn handle_run_space(
             requirements,
             session,
         } => {
-            migration(&ui, "colab-cli run pip install ...");
+            migration(&ui, "colab run pip install ...");
             if let Some(requirements) = requirements {
                 if !packages.is_empty() {
                     return Err(ColabError::config(
@@ -1873,14 +2021,14 @@ async fn handle_run_space(
             }
         }
         RunCommands::Freeze { session } => {
-            migration(&ui, "colab-cli run pip freeze");
+            migration(&ui, "colab run pip freeze");
             handle_env(EnvCommands::Freeze { session }, config, ui).await
         }
         RunCommands::Restore {
             requirements,
             session,
         } => {
-            migration(&ui, "colab-cli run pip restore requirements.txt");
+            migration(&ui, "colab run pip restore requirements.txt");
             handle_env(
                 EnvCommands::Restore {
                     requirements,
@@ -2146,7 +2294,7 @@ async fn run_pkg_action(
     let (view, kernel_session) = active_kernel_session(&manager, &server).await?;
     let Some(code) = kernel::package_code(&view.language, action, &args) else {
         return Err(ColabError::config(format!(
-            "package tooling is not available for this kernel\nlanguage: {}\nfix: use `colab-cli run code --code \"...\"`",
+            "package tooling is not available for this kernel\nlanguage: {}\nfix: use `colab run code --code \"...\"`",
             view.language.display_name()
         )));
     };
@@ -2186,9 +2334,10 @@ async fn active_kernel_session(
                 .position(|s| s.kernel.as_ref().map(|k| &k.id) == Some(id))
         })
         .unwrap_or(0);
-    let session = sessions.get(selected_pos).cloned().ok_or_else(|| {
-        ColabError::config("no running kernels\nfix: colab-cli session url --open")
-    })?;
+    let session = sessions
+        .get(selected_pos)
+        .cloned()
+        .ok_or_else(|| ColabError::config("no running kernels\nfix: colab session url --open"))?;
     let info = detect_kernel_info(manager.client(), server, &session, None).await;
     let view = KernelView::from_session(server, &session, info, true)?;
     cache_kernel_view(manager, server, &view)?;
@@ -2220,7 +2369,7 @@ fn ensure_cached_language_allows(
         _ => "package tooling",
     };
     Err(ColabError::config(format!(
-        "{tool}, but the active kernel is {}\nuse: colab-cli run pkg add <package>",
+        "{tool}, but the active kernel is {}\nuse: colab run pkg add <package>",
         language.display_name()
     )))
 }
@@ -2330,9 +2479,7 @@ async fn handle_repl(
         .iter()
         .find(|s| s.kernel.is_some())
         .ok_or_else(|| {
-            ColabError::config(
-                "REPL needs a Colab kernel session\nfix: colab-cli session url --open",
-            )
+            ColabError::config("REPL needs a Colab kernel session\nfix: colab session url --open")
         })?;
     let kernel_id = session
         .kernel
@@ -2407,7 +2554,7 @@ fn repl_runtime_error(server: &StoredServer, stage: &str, error: ColabError) -> 
 
 fn repl_endpoint_error(server: &StoredServer, stage: &str, message: &str) -> ColabError {
     ColabError::config(format!(
-        "REPL failed\n\n{message}\nsession: {}\nstage: {stage}\n\nfix: colab-cli session list --refresh\n     colab-cli session new --name work",
+        "REPL failed\n\n{message}\nsession: {}\nstage: {stage}\n\nfix: colab session list --refresh\n     colab session new --name work",
         server.label
     ))
 }
@@ -2658,10 +2805,10 @@ async fn handle_fs(cmd: FsCommands, config: &ColabConfig, ui: Ui, json: bool) ->
             ];
             handle_file_ls(config, ui, session, args).await
         }
-        FsCommands::Push { src, dest, session } => {
+        FsCommands::Upload { src, dest, session } | FsCommands::Push { src, dest, session } => {
             handle_upload(config, ui, session, &src, Some(&dest)).await
         }
-        FsCommands::Pull { src, dest, session } => {
+        FsCommands::Download { src, dest, session } | FsCommands::Pull { src, dest, session } => {
             handle_download(config, ui, session, &src, dest.as_deref()).await
         }
         FsCommands::Rm {
@@ -2741,7 +2888,7 @@ async fn handle_fs_drive(
                     &serde_json::json!({
                         "action": "drive.status",
                         "needs_session": true,
-                        "next_action": "run `colab-cli fs drive mount --session NAME` if not mounted"
+                        "next_action": "run `colab fs drive mount --session NAME` if not mounted"
                     }),
                 );
             }
@@ -2945,7 +3092,7 @@ async fn drive_mount(
         Err(ColabError::drive(
             "drive_status_unknown",
             "Could not confirm Drive status after mount",
-            Some("colab-cli fs drive status"),
+            Some("colab fs drive status"),
             Some(output.raw_text()),
         ))
     }
@@ -2979,8 +3126,8 @@ fn validate_runtime_endpoint(server: &StoredServer) -> Result<()> {
             "validate_endpoint_url",
             false,
             vec![
-                "colab-cli session list --refresh".to_string(),
-                "colab-cli session new --name work".to_string(),
+                "colab session list --refresh".to_string(),
+                "colab session new --name work".to_string(),
             ],
             None,
         ));
@@ -2992,8 +3139,8 @@ fn validate_runtime_endpoint(server: &StoredServer) -> Result<()> {
             "validate_endpoint_url",
             false,
             vec![
-                "colab-cli session repair".to_string(),
-                "colab-cli session new --name work".to_string(),
+                "colab session repair".to_string(),
+                "colab session new --name work".to_string(),
             ],
             Some(server.proxy_url.clone()),
         ));
@@ -3103,7 +3250,7 @@ fn select_drive_kernel(sessions: &[Session]) -> Result<&Session> {
             "Drive mount needs a Colab kernel session",
             "find_kernel",
             false,
-            vec!["colab-cli session url --open".to_string()],
+            vec!["colab session url --open".to_string()],
             None,
         )
     })
@@ -3180,8 +3327,8 @@ fn map_session_network_error(stage: &str, error: ColabError) -> ColabError {
                 stage,
                 retryable,
                 vec![
-                    "colab-cli session list --refresh".to_string(),
-                    "colab-cli session new --name work".to_string(),
+                    "colab session list --refresh".to_string(),
+                    "colab session new --name work".to_string(),
                 ],
                 Some(format!("{url}\n{body:?}")),
             )
@@ -3191,7 +3338,7 @@ fn map_session_network_error(stage: &str, error: ColabError) -> ColabError {
             "Session refresh could not reach Colab",
             stage,
             true,
-            vec!["colab-cli session list --refresh".to_string()],
+            vec!["colab session list --refresh".to_string()],
             Some(e.to_string()),
         ),
         other => other,
@@ -3229,8 +3376,8 @@ fn drive_endpoint_error(
         stage.to_string(),
         retryable,
         vec![
-            "colab-cli session list --refresh".to_string(),
-            "colab-cli session new --name work".to_string(),
+            "colab session list --refresh".to_string(),
+            "colab session new --name work".to_string(),
         ],
         raw,
     )
@@ -3293,7 +3440,7 @@ async fn drive_unmount(
         return Err(ColabError::drive(
             "drive_unmount_timeout",
             "Drive unmount did not finish before timeout",
-            Some("colab-cli fs drive status"),
+            Some("colab fs drive status"),
             Some(output.raw_text()),
         ));
     }
@@ -3341,7 +3488,7 @@ async fn drive_status_for_server(
                     ok: false,
                     mounted: None,
                     path: path.to_string(),
-                    next_action: Some("colab-cli status check".to_string()),
+                    next_action: Some("colab status check".to_string()),
                 });
             }
         };
@@ -3368,7 +3515,7 @@ async fn preflight_drive_kernel(
         return Err(ColabError::drive(
             "drive_kernel_timeout",
             "Drive mount needs a responsive Colab kernel session",
-            Some("colab-cli session url --open"),
+            Some("colab session url --open"),
             Some(output.raw_text()),
         ));
     }
@@ -3378,7 +3525,7 @@ async fn preflight_drive_kernel(
         Err(ColabError::drive(
             "drive_kernel_context_required",
             "Drive mount needs a Colab kernel session, not a plain Python process",
-            Some("colab-cli session url --open"),
+            Some("colab session url --open"),
             Some(output.raw_text()),
         ))
     }
@@ -3454,13 +3601,13 @@ fn parse_drive_status(output: &str, path: &str) -> DriveStatus {
             ok: true,
             mounted: Some(false),
             path: path.to_string(),
-            next_action: Some("colab-cli fs drive mount".to_string()),
+            next_action: Some("colab fs drive mount".to_string()),
         },
         _ => DriveStatus {
             ok: false,
             mounted: None,
             path: path.to_string(),
-            next_action: Some("colab-cli status check".to_string()),
+            next_action: Some("colab status check".to_string()),
         },
     }
 }
@@ -3486,7 +3633,7 @@ fn drive_output_to_result(output: &runner::CellOutput) -> Result<()> {
         return Err(ColabError::drive(
             "drive_mount_failed",
             "Drive command failed",
-            Some("colab-cli fs drive status"),
+            Some("colab fs drive status"),
             Some(raw),
         ));
     }
@@ -3501,7 +3648,7 @@ fn classify_drive_error(raw: &str) -> Option<ColabError> {
         return Some(ColabError::drive(
             "drive_kernel_context_required",
             "Drive mount needs a Colab kernel session, not a plain Python process",
-            Some("colab-cli session url --open"),
+            Some("colab session url --open"),
             Some(raw.to_string()),
         ));
     }
@@ -3519,7 +3666,7 @@ fn classify_drive_error(raw: &str) -> Option<ColabError> {
         return Some(ColabError::drive(
             "drive_unsupported",
             "Drive mount is not supported for this runtime",
-            Some("colab-cli status check"),
+            Some("colab status check"),
             Some(raw.to_string()),
         ));
     }
@@ -3530,7 +3677,7 @@ fn drive_approval_required(raw: Option<String>) -> ColabError {
     ColabError::drive(
         "drive_browser_approval_required",
         "Drive needs browser approval",
-        Some("open the session once, then run fs drive mount again: colab-cli session url --open"),
+        Some("open the session once, then run fs drive mount again: colab session url --open"),
         raw,
     )
 }
@@ -3617,12 +3764,12 @@ async fn handle_runtime(
         }
         RuntimeCommands::BackendInfo | RuntimeCommands::Versions => print_backend_info(json),
         RuntimeCommands::Gpu => {
-            ui.info("GPU details require a session; use `colab-cli run py --code \"import torch; print(torch.cuda.get_device_name(0))\"`.");
+            ui.info("GPU details require a session; use `colab run py --code \"import torch; print(torch.cuda.get_device_name(0))\"`.");
             Ok(())
         }
         RuntimeCommands::Tpu => {
             ui.info(
-                "TPU details require a session; use `colab-cli status runtime --backend` for package baselines.",
+                "TPU details require a session; use `colab status runtime --backend` for package baselines.",
             );
             Ok(())
         }
@@ -3701,7 +3848,7 @@ async fn handle_status(
                 &serde_json::json!({
                     "signed_in": auth_state.is_some(),
                     "email": auth_state.as_ref().map(|email| crate::cocli::auth::redaction::redacted_email(email, false)),
-                    "next_action": if auth_state.is_some() { "run `colab-cli session list`" } else { "run `colab-cli auth login`" }
+                    "next_action": if auth_state.is_some() { "run `colab session list`" } else { "run `colab auth login`" }
                 }),
             )
         }
@@ -3710,7 +3857,7 @@ async fn handle_status(
             "files",
             &serde_json::json!({
                 "sync": "manifest dry-run available",
-                "next_action": "run `colab-cli fs changed LOCAL REMOTE`"
+                "next_action": "run `colab fs changed LOCAL REMOTE`"
             }),
         ),
         Some(StatusCommands::Drive) => print_value_or_kv(
@@ -3718,7 +3865,7 @@ async fn handle_status(
             "drive",
             &serde_json::json!({
                 "status": "needs live session",
-                "next_action": "run `colab-cli fs drive status --session NAME`"
+                "next_action": "run `colab fs drive status --session NAME`"
             }),
         ),
         Some(StatusCommands::Kernel {
@@ -3774,7 +3921,7 @@ async fn handle_status(
             &serde_json::json!({
                 "config": config,
                 "exists": Path::new(&config).exists(),
-                "next_action": if Path::new(&config).exists() { "run `colab-cli distribute recipe explain`" } else { "run `colab-cli distribute recipe init`" }
+                "next_action": if Path::new(&config).exists() { "run `colab distribute recipe explain`" } else { "run `colab distribute recipe init`" }
             }),
         ),
         Some(StatusCommands::Fleet { config }) => {
@@ -3786,7 +3933,7 @@ async fn handle_status(
                     &serde_json::json!({
                         "enabled": false,
                         "experimental": true,
-                        "fix": "colab-cli settings experiments"
+                        "fix": "colab settings experiments"
                     }),
                 );
             }
@@ -3808,7 +3955,7 @@ async fn handle_status(
                     &serde_json::json!({
                         "config": config,
                         "exists": false,
-                        "next_action": "run `colab-cli distribute recipe init`"
+                        "next_action": "run `colab distribute recipe init`"
                     }),
                 )
             }
@@ -3827,7 +3974,7 @@ async fn handle_status(
             "run",
             &serde_json::json!({
                 "note": "runtime setup checks require a live session",
-                "next_action": "run `colab-cli run py --session NAME --code \"import sys; print(sys.version)\"`"
+                "next_action": "run `colab run py --session NAME --code \"import sys; print(sys.version)\"`"
             }),
         ),
         Some(StatusCommands::Paths) => print_value_or_kv(
@@ -3888,9 +4035,9 @@ fn build_status_report(config: &ColabConfig) -> Result<StatusReport> {
     let cfg = load_cocli_config().unwrap_or_default();
     let recipe_exists = Path::new("cocli.recipe.toml").exists() || Path::new("slurp.toml").exists();
     let fix = if account.is_none() {
-        Some("run colab-cli auth login".to_string())
+        Some("run colab auth login".to_string())
     } else if !has_session {
-        Some("run colab-cli session list".to_string())
+        Some("run colab session list".to_string())
     } else if !files_ready {
         Some("check local data directory permissions".to_string())
     } else {
@@ -4223,13 +4370,21 @@ fn handle_settings_update(command: SettingsUpdateCommands, json: bool) -> Result
         SettingsUpdateCommands::Install { yes } => {
             if !yes {
                 return Err(ColabError::config(
-                    "update install requires --yes; colab-cli will not self-modify blindly",
+                    "update install requires --yes; colab will not self-modify blindly",
                 ));
             }
             Err(ColabError::config(
                 "automatic update install is not configured for this binary\nfix: reinstall with your package manager",
             ))
         }
+    }
+}
+
+fn handle_update(install: bool, yes: bool, json: bool) -> Result<()> {
+    if install {
+        handle_settings_update(SettingsUpdateCommands::Install { yes }, json)
+    } else {
+        handle_settings_update(SettingsUpdateCommands::Check, json)
     }
 }
 
@@ -4279,7 +4434,7 @@ fn handle_settings_billing(command: SettingsBillingCommands, json: bool) -> Resu
             &serde_json::json!({
                 "available": false,
                 "message": "billing status unavailable from local config",
-                "open": "colab-cli settings billing open"
+                "open": "colab pay"
             }),
         ),
     }
@@ -4297,7 +4452,6 @@ fn print_settings_overview(json: bool, ui: Ui) -> Result<()> {
         ("Experiments", "disabled optional features"),
         ("AI", "agent and tool workflows"),
         ("Auth", "ADC, OAuth2, and profiles"),
-        ("Billing", "Colab billing links and local status"),
         ("Support", "redacted bug reports and bundles"),
         ("Dev", "maintainer-only tools, hidden by default"),
     ];
@@ -4315,7 +4469,7 @@ fn print_settings_menu(
     rows: &[(&str, &str)],
 ) -> Result<()> {
     println!("{}", heading("Settings", ui));
-    println!("Config, UI, experiments, support, billing");
+    println!("Config, UI, support, and experiments");
     println!();
     for (index, (name, note)) in rows
         .iter()
@@ -4347,7 +4501,6 @@ enum SettingsPage {
     Experiments,
     Ai,
     Auth,
-    Billing,
     Support,
     Dev,
 }
@@ -4458,7 +4611,6 @@ impl SettingsEditorState {
             ),
             (SettingsPage::Ai, "AI", "agent and tool workflows"),
             (SettingsPage::Auth, "Auth", "ADC, OAuth2, and profiles"),
-            (SettingsPage::Billing, "Billing", "Colab billing helpers"),
             (SettingsPage::Support, "Support", "redacted bug reports"),
         ];
         if dev_visible(&self.cfg) {
@@ -4750,16 +4902,12 @@ fn print_settings_editor(state: &SettingsEditorState, ui: Ui) -> Result<()> {
             println!("MCP and plan runner are controlled under Experiments.");
         }
         SettingsPage::Auth => {
-            println!("ADC and OAuth2 profiles live under `colab-cli auth`.");
+            println!("ADC and OAuth2 profiles live under `colab auth`.");
             println!("Tokens are not stored in config.toml.");
-        }
-        SettingsPage::Billing => {
-            println!("Billing helpers live under `colab-cli settings billing`.");
-            println!("Exact compute-unit status is shown only when available.");
         }
         SettingsPage::Support => {
             println!("Bug reports are redacted by default.");
-            println!("Use `colab-cli settings support bug-report` for a bundle.");
+            println!("Use `colab settings support bug-report` for a bundle.");
         }
         SettingsPage::Dev => println!("Private maintainer tools."),
     }
@@ -4785,7 +4933,6 @@ fn settings_page_title(page: SettingsPage) -> &'static str {
         SettingsPage::Experiments => "Experiments",
         SettingsPage::Ai => "AI",
         SettingsPage::Auth => "Auth",
-        SettingsPage::Billing => "Billing",
         SettingsPage::Support => "Support",
         SettingsPage::Dev => "Dev",
     }
@@ -4871,7 +5018,7 @@ fn handle_settings_ui(command: Option<SettingsUiCommands>, ui: Ui, json: bool) -
                 println!("  {} warning", status_symbol("warn", ui));
                 println!("  {} error", status_symbol("error", ui));
                 println!("  {} info", status_symbol("info", ui));
-                println!("  {} command", command_text("colab-cli status", ui));
+                println!("  {} command", command_text("colab status", ui));
                 Ok(())
             }
         }
@@ -5022,7 +5169,7 @@ fn handle_experiment_set(key: &str, value: String, json: bool) -> Result<()> {
         "multi_login" => {
             if enabled && !cfg.experiments.distribute {
                 return Err(ColabError::config(
-                    "multi-login requires distribute\nenable: colab-cli settings experiments set distribute true",
+                    "multi-login requires distribute\nenable: colab settings experiments set distribute true",
                 ));
             }
             cfg.experiments.multi_login = enabled;
@@ -5396,7 +5543,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Explain a recipe plan",
             &["config"],
             &["plan", "findings"],
-            &["colab-cli distribute recipe explain --json"],
+            &["colab distribute recipe explain --json"],
             &["Local read only"],
         ),
         skill(
@@ -5408,7 +5555,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Render a clean recipe explanation",
             &["config"],
             &["summary"],
-            &["colab-cli distribute recipe explain --json"],
+            &["colab distribute recipe explain --json"],
             &["Local read only"],
         ),
         skill(
@@ -5420,7 +5567,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Plan approved runtime work",
             &["config", "cost"],
             &["plan", "compliance"],
-            &["colab-cli distribute plan --json"],
+            &["colab distribute plan --json"],
             &["No quota bypass", "No hidden execution"],
         ),
         skill(
@@ -5432,7 +5579,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Show distribute planning status",
             &["config"],
             &["status"],
-            &["colab-cli distribute status --json"],
+            &["colab distribute status --json"],
             &["Local read only"],
         ),
         skill(
@@ -5444,7 +5591,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Save checkpoint metadata",
             &["session", "name", "artifacts"],
             &["manifest"],
-            &["colab-cli continue save --session work --name run-a"],
+            &["colab continue save --session work --name run-a"],
             &["Does not copy live Python memory"],
         ),
         skill(
@@ -5456,7 +5603,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Resume from checkpoint metadata",
             &["name", "dry_run"],
             &["resume_plan"],
-            &["colab-cli continue resume run-a --dry-run --json"],
+            &["colab continue resume run-a --dry-run --json"],
             &["Network work requires explicit command flags"],
         ),
         skill(
@@ -5468,7 +5615,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Inspect runtime metadata",
             &["session"],
             &["runtime"],
-            &["colab-cli status runtime --all --json"],
+            &["colab status runtime --all --json"],
             &["No package installs"],
         ),
         skill(
@@ -5480,7 +5627,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Compare local and remote trees",
             &["local", "remote"],
             &["diff"],
-            &["colab-cli fs diff ./src /content/src --json"],
+            &["colab fs diff ./src /content/src --json"],
             &["Destructive sync requires separate confirmation"],
         ),
         skill(
@@ -5492,7 +5639,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Show local changes that sync would upload",
             &["local", "remote"],
             &["changed"],
-            &["colab-cli fs changed ./src /content/src --json"],
+            &["colab fs changed ./src /content/src --json"],
             &["Read-only comparison"],
         ),
         skill(
@@ -5504,7 +5651,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Write a redacted diagnostic bundle",
             &["show_private"],
             &["bundle"],
-            &["colab-cli settings support bug-report --json"],
+            &["colab settings support bug-report --json"],
             &["Secrets are redacted by default"],
         ),
         skill(
@@ -5516,7 +5663,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "List MCP-compatible tool metadata",
             &[],
             &["tools"],
-            &["colab-cli settings skills mcp --json"],
+            &["colab settings skills mcp --json"],
             &["No transport server starts unless requested"],
         ),
         skill(
@@ -5528,7 +5675,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Outline local code",
             &["file"],
             &["imports", "functions", "classes"],
-            &["colab-cli run ast file.py --json"],
+            &["colab run ast file.py --json"],
             &["Local read only"],
         ),
         skill(
@@ -5540,7 +5687,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Watch a local code outline",
             &["file"],
             &["outline"],
-            &["colab-cli run watch file.py --ast"],
+            &["colab run watch file.py --ast"],
             &["Local read only"],
         ),
         skill(
@@ -5552,7 +5699,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Plan a built-in tool invocation from JSON",
             &["name", "input"],
             &["planned_command"],
-            &["colab-cli settings skills run recipe.plan --json-input '{}'"],
+            &["colab settings skills run recipe.plan --json-input '{}'"],
             &["Plans are inspectable before execution"],
         ),
         skill(
@@ -5564,7 +5711,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Draft an explicit agent plan",
             &["goal"],
             &["plan"],
-            &["colab-cli settings skills inspect agent.plan"],
+            &["colab settings skills inspect agent.plan"],
             &["No autonomous execution"],
         ),
         skill(
@@ -5576,7 +5723,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Check a plan before running it",
             &["plan"],
             &["findings"],
-            &["colab-cli settings skills inspect agent.audit"],
+            &["colab settings skills inspect agent.audit"],
             &["Destructive actions require confirmation"],
         ),
     ];
@@ -5590,7 +5737,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "List running kernels",
             &["session"],
             &["kernels"],
-            &["colab-cli session kernel list --json"],
+            &["colab session kernel list --json"],
             &["Read-only"],
         ),
         skill(
@@ -5602,7 +5749,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Select the active kernel",
             &["kernel"],
             &["selection"],
-            &["colab-cli session kernel select python3"],
+            &["colab session kernel select python3"],
             &["No code execution"],
         ),
         skill(
@@ -5614,7 +5761,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Restart the selected kernel",
             &["yes"],
             &["status"],
-            &["colab-cli session kernel restart --yes --json"],
+            &["colab session kernel restart --yes --json"],
             &["Loses in-kernel variables"],
         ),
         skill(
@@ -5626,7 +5773,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
             "Interrupt running kernel code",
             &["yes"],
             &["status"],
-            &["colab-cli session kernel interrupt --json"],
+            &["colab session kernel interrupt --json"],
             &["Stops current execution where supported"],
         ),
     ]);
@@ -5641,7 +5788,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
                 "Run Python package tooling",
                 &["packages"],
                 &["pip_output"],
-                &["colab-cli run pkg add numpy --json"],
+                &["colab run pkg add numpy --json"],
                 &["Routes through active Python kernel"],
             )),
             KernelLanguage::Julia => rows.push(skill(
@@ -5653,7 +5800,7 @@ fn agent_skill_rows() -> Vec<SkillRow> {
                 "Run Julia Pkg tooling",
                 &["packages"],
                 &["pkg_output"],
-                &["colab-cli run pkg add CSV --json"],
+                &["colab run pkg add CSV --json"],
                 &["Routes through active Julia kernel"],
             )),
             KernelLanguage::R => rows.push(skill(
@@ -5665,36 +5812,25 @@ fn agent_skill_rows() -> Vec<SkillRow> {
                 "Run R package tooling",
                 &["packages"],
                 &["package_output"],
-                &["colab-cli run pkg add dplyr --json"],
+                &["colab run pkg add dplyr --json"],
                 &["Routes through active R kernel"],
             )),
             _ => {}
         }
     }
-    for row in &mut rows {
-        if row.name.starts_with("distribute.") {
-            row.state = if cfg.experiments.distribute {
-                "ready"
-            } else {
-                "gated"
-            };
+    rows.retain(|row| {
+        if row.name.starts_with("recipe.") || row.name.starts_with("distribute.") {
+            cfg.experiments.distribute
+        } else if row.name.starts_with("continue.") {
+            cfg.experiments.continue_work
         } else if row.name.starts_with("ast.") {
-            row.state = if cfg.experiments.ast_observer {
-                "ready"
-            } else {
-                "off"
-            };
+            cfg.experiments.ast_observer
         } else if row.name.starts_with("mcp.") {
-            row.state = if cfg.experiments.mcp_server {
-                "ready"
-            } else {
-                "off"
-            };
+            cfg.experiments.mcp_server
+        } else {
+            true
         }
-    }
-    if !cfg.experiments.continue_work {
-        rows.retain(|row| !row.name.starts_with("continue."));
-    }
+    });
     rows
 }
 
@@ -5927,15 +6063,15 @@ fn handle_fleet(cmd: FleetCommands, ui: Ui, json: bool) -> Result<()> {
                 return print_fleet_plan(&cfg, &plan, &findings, json || args.cost);
             }
             Err(ColabError::config(
-                "distribute execution is deferred; run `colab-cli distribute plan --cost`",
+                "distribute execution is deferred; run `colab distribute plan --cost`",
             ))
         }
         FleetCommands::Doctor => {
-            migration(&ui, "colab-cli status fleet");
+            migration(&ui, "colab status fleet");
             let data = serde_json::json!({
                 "distribute_mode": "compliant",
                 "fallback_rotation": false,
-                "next_action": "run `colab-cli distribute plan --config cocli.recipe.toml`"
+                "next_action": "run `colab distribute plan --config cocli.recipe.toml`"
             });
             print_value(json, &data)
         }
@@ -5990,7 +6126,7 @@ fn handle_slurp(cmd: SlurpCommands, ui: Ui, json: bool) -> Result<()> {
             }
         }
         SlurpCommands::Doctor(args) => {
-            migration(&ui, "colab-cli status slurp");
+            migration(&ui, "colab status slurp");
             let cfg = load_slurp(&args.config)?;
             let mut findings = crate::cocli::fleet::compliance::validate_slurp(&cfg);
             if !Path::new(&cfg.work.entry).exists() {
@@ -6357,7 +6493,6 @@ fn handle_ai(cmd: Option<AiCommands>, ui: Ui, json: bool) -> Result<()> {
             println!("  tools       list and inspect agent-friendly tools");
             println!("  plan        draft an inspectable plan");
             println!("  audit       check a saved plan");
-            println!("  ast         local code outline");
             println!("  mcp         disabled unless enabled in experiments");
             Ok(())
         }
@@ -6498,7 +6633,7 @@ fn require_experiment(
 
 fn experiment_error(name: &str) -> ColabError {
     ColabError::config(format!(
-        "experimental feature disabled: {name}\nenable: colab-cli settings experiments"
+        "experimental feature disabled: {name}\nenable: colab settings experiments"
     ))
 }
 
@@ -6661,7 +6796,7 @@ async fn handle_continue(
         }
         ContinueCommands::Last => {
             let name = newest_continuation(config)?.ok_or_else(|| {
-                ColabError::config("resume needs a checkpoint - run `colab-cli continue list`")
+                ColabError::config("resume needs a checkpoint - run `colab continue list`")
             })?;
             let manifest = read_continuation(config, &name)?;
             print_value(json, &manifest)
@@ -6954,7 +7089,7 @@ async fn handle_file_edit(
     _path: String,
 ) -> Result<()> {
     Err(ColabError::config(
-        "fs edit is not wired yet; use `fs pull`, edit locally, then `fs push`",
+        "fs edit is not wired yet; use `fs download`, edit locally, then `fs upload`",
     ))
 }
 
@@ -6966,7 +7101,7 @@ fn handle_fs_sync(args: FsSyncArgs, ui: Ui, json: bool) -> Result<()> {
     }
     if !args.dry_run {
         return Err(ColabError::config(
-            "fs sync currently supports --dry-run planning; use `fs push` for writes",
+            "fs sync currently supports --dry-run planning; use `fs upload` for writes",
         ));
     }
     let plan = local_sync_plan(&args.local, &args.include, &args.exclude, args.delete)?;
@@ -7042,29 +7177,29 @@ fn migration(ui: &Ui, new: &str) {
 fn runtime_migration_target(cmd: &RuntimeCommands) -> &'static str {
     match cmd {
         RuntimeCommands::Info { backend: true } | RuntimeCommands::BackendInfo => {
-            "colab-cli status runtime --backend"
+            "colab status runtime --backend"
         }
-        RuntimeCommands::Info { backend: false } => "colab-cli status runtime",
-        RuntimeCommands::Gpu => "colab-cli status runtime --gpu",
-        RuntimeCommands::Tpu => "colab-cli status runtime --tpu",
-        RuntimeCommands::Versions => "colab-cli status runtime --versions",
-        RuntimeCommands::Fit { .. } => "colab-cli status runtime --fit MODEL",
+        RuntimeCommands::Info { backend: false } => "colab status runtime",
+        RuntimeCommands::Gpu => "colab status runtime --gpu",
+        RuntimeCommands::Tpu => "colab status runtime --tpu",
+        RuntimeCommands::Versions => "colab status runtime --versions",
+        RuntimeCommands::Fit { .. } => "colab status runtime --fit MODEL",
     }
 }
 
 fn mount_migration_target(cmd: &MountCommands) -> &'static str {
     match cmd {
-        MountCommands::Drive { .. } => "colab-cli fs drive mount",
-        MountCommands::List { .. } => "colab-cli fs drive status",
+        MountCommands::Drive { .. } => "colab fs drive mount",
+        MountCommands::List { .. } => "colab fs drive status",
     }
 }
 
 fn config_migration_target(cmd: &ConfigCommands) -> &'static str {
     match cmd {
-        ConfigCommands::Get => "colab-cli settings get",
-        ConfigCommands::Set { .. } => "colab-cli settings set KEY VALUE",
-        ConfigCommands::Path => "colab-cli settings path",
-        ConfigCommands::Open => "colab-cli settings edit",
+        ConfigCommands::Get => "colab settings get",
+        ConfigCommands::Set { .. } => "colab settings set KEY VALUE",
+        ConfigCommands::Path => "colab settings path",
+        ConfigCommands::Open => "colab settings edit",
     }
 }
 
@@ -8229,7 +8364,7 @@ fn resolve_server<'a>(servers: &'a [StoredServer], name: Option<&str>) -> Result
         Some("-") => servers
             .iter()
             .max_by_key(|s| s.date_assigned)
-            .ok_or_else(|| ColabError::config("no active session - run `colab-cli session list`")),
+            .ok_or_else(|| ColabError::config("no active session - run `colab session list`")),
         Some(n) => servers
             .iter()
             .find(|s| s.label == n || s.endpoint == n || s.id.to_string() == n)
@@ -8483,15 +8618,12 @@ mod tests {
         assert_eq!(not_mounted.mounted, Some(false));
         assert_eq!(
             not_mounted.next_action.as_deref(),
-            Some("colab-cli fs drive mount")
+            Some("colab fs drive mount")
         );
 
         let unknown = parse_drive_status("", "/content/drive");
         assert_eq!(unknown.mounted, None);
-        assert_eq!(
-            unknown.next_action.as_deref(),
-            Some("colab-cli status check")
-        );
+        assert_eq!(unknown.next_action.as_deref(), Some("colab status check"));
     }
 
     #[test]
@@ -8507,7 +8639,7 @@ mod tests {
         );
         assert_eq!(
             drive.next_action.as_deref(),
-            Some("colab-cli session url --open")
+            Some("colab session url --open")
         );
         assert!(drive.raw.as_deref().unwrap_or_default().contains("kernel"));
     }
@@ -8522,9 +8654,7 @@ mod tests {
         assert_eq!(drive.message, "Drive needs browser approval");
         assert_eq!(
             drive.next_action.as_deref(),
-            Some(
-                "open the session once, then run fs drive mount again: colab-cli session url --open"
-            )
+            Some("open the session once, then run fs drive mount again: colab session url --open")
         );
     }
 
@@ -8548,7 +8678,7 @@ mod tests {
         assert!(assignment_retryable(&err));
         assert_eq!(
             api_fix(503, url),
-            Some("run again with Standard RAM: colab-cli session new --shape standard")
+            Some("run again with Standard RAM: colab session new --shape standard")
         );
     }
 

@@ -3,11 +3,11 @@
 Verbose mode is for debugging cocli, not normal use.
 
 ```sh
-colab-cli -v status
-colab-cli -vv fs drive mount
-colab-cli -vvv fs drive mount
-colab-cli -v run repl
-colab-cli -v run shell
+colab -v status
+colab -vv fs drive mount
+colab -vvv fs drive mount
+colab -v run repl
+colab -v run shell
 ```
 
 Levels:
@@ -31,7 +31,7 @@ Drive mount example:
 
 ```text
 debug1: command fs.drive.mount
-debug1: config loaded path=~/Library/Application Support/colab-cli/config.toml
+debug1: config loaded path=~/Library/Application Support/colab/config.toml
 debug1: session store loaded sessions=1 selected="<auto>"
 debug1: selected session name="Colab CPU"
 debug1: drive.mount stage=load_session ok name="Colab CPU"

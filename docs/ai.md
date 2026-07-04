@@ -1,21 +1,24 @@
 # AI
 
-`colab-cli ai` is the agent-facing command space. Normal user work stays under `session`, `run`, `fs`, `status`, `auth`, and `settings`. Experimental workflow work is under `distribute` only after it is enabled.
+`colab ai` is the agent-facing command space. Normal user work stays under `session`, `run`, `fs`, `status`, `auth`, and `settings`. Experimental workflow work is under `distribute` only after it is enabled.
 
 ```sh
-colab-cli ai tools list
-colab-cli ai tools inspect recipe.plan
-colab-cli ai code explain file.py
-colab-cli ai code deps file.py
-colab-cli ai plan "prepare a local review plan"
-colab-cli ai audit plan.toml
-colab-cli ai explain plan.toml
-colab-cli ai run plan.toml --confirm
+colab ai tools list
+colab ai tools inspect runtime.inspect
+colab ai code explain file.py
+colab ai code deps file.py
+colab ai plan "prepare a local review plan"
+colab ai audit plan.toml
+colab ai explain plan.toml
+colab ai run plan.toml --confirm
 ```
 
-`ai tools list` is read-only and available by default. It lists optional tool
-surfaces such as `recipe.plan`, `distribute.plan`, `fs.diff`, `ast.outline`,
-`kernel.list`, `kernel.restart`, `mcp.tools`, and `ai.audit`.
+`ai tools list` is read-only and available by default. It lists ready tool
+surfaces such as `runtime.inspect`, `fs.diff`, `fs.changed`, `kernel.list`,
+`kernel.restart`, and `ai.audit`.
+
+Recipe/distribute, continue, AST, and MCP rows appear only after their
+experiments are enabled.
 
 Package tool rows adapt to cached kernel metadata. Python shows `pkg.python`,
 Julia shows `pkg.julia`, and R shows `pkg.r`. The catalog does not list pip as
@@ -24,9 +27,9 @@ an agent tool for Julia or R kernels.
 AST observation is shown through `run`:
 
 ```sh
-colab-cli run ast file.py
-colab-cli run watch file.py --ast
-colab-cli run script file.py --ast --session trainer
+colab run ast file.py
+colab run watch file.py --ast
+colab run script file.py --ast --session trainer
 ```
 
 Execution is gated:

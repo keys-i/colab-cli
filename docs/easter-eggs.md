@@ -5,7 +5,7 @@ Fun output is tiny and opt-in or explicit.
 Preference:
 
 ```sh
-colab-cli settings set ui.fun true
+colab settings set ui.fun true
 ```
 
 Rules:

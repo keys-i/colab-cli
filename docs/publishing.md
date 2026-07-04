@@ -14,7 +14,7 @@ Manual Cargo dry-run:
 
 ```sh
 cargo package --allow-dirty
-cargo publish --dry-run -p colab-cli
+cargo publish --dry-run -p colab
 ```
 
 Do not run real `cargo publish` without an explicit maintainer instruction.
@@ -26,9 +26,9 @@ Release checklist:
 - `cargo test --all-targets`
 - `cargo doc --no-deps`
 - `cargo package --allow-dirty`
-- `cargo publish --dry-run -p colab-cli`
+- `cargo publish --dry-run -p colab`
 - `cargo shipyard compare-release-plz --repo .` when comparing release tooling
 - verify no credentials are included
 - tag only after dry-runs pass
 
-Only `colab-cli` is published. Internal `src/cocli/*` modules are not separate crates.
+Only `colab` is published. Internal `src/cocli/*` modules are not separate crates.

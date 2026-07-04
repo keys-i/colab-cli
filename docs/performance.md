@@ -2,7 +2,7 @@
 
 Budgets:
 
-- `colab-cli --help` under 80 ms locally where realistic
+- `colab --help` under 80 ms locally where realistic
 - normal config load under 5 ms
 - manifest diff handles 10k files without a full hash pass
 - chunk planning does not read file bytes

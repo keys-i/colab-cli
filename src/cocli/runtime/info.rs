@@ -99,19 +99,19 @@ pub struct MigrationHint {
 pub fn migration_hint(old_command: &[&str]) -> Option<MigrationHint> {
     let first = old_command.first().copied()?;
     let new = match first {
-        "new" => "colab-cli session new",
-        "sessions" => "colab-cli session list",
-        "status" => "colab-cli status session",
-        "stop" => "colab-cli session stop",
-        "url" => "colab-cli session url",
-        "exec" => "colab-cli run py",
-        "run" => "colab-cli run script",
-        "upload" => "colab-cli fs push",
-        "download" => "colab-cli fs pull",
-        "ls" => "colab-cli fs ls",
-        "rm" => "colab-cli fs rm",
-        "drivemount" => "colab-cli fs drive mount",
-        "install" => "colab-cli run pip install",
+        "new" => "colab session new",
+        "sessions" => "colab session list",
+        "status" => "colab status session",
+        "stop" => "colab session stop",
+        "url" => "colab session url",
+        "exec" => "colab run py",
+        "run" => "colab run script",
+        "upload" => "colab fs push",
+        "download" => "colab fs pull",
+        "ls" => "colab fs ls",
+        "rm" => "colab fs rm",
+        "drivemount" => "colab fs drive mount",
+        "install" => "colab run pip install",
         _ => return None,
     };
     Some(MigrationHint {
@@ -136,7 +136,7 @@ mod tests {
     fn migration_hints_cover_old_exec() {
         let hint = migration_hint(&["exec", "-f", "train.py"]).unwrap();
         assert_eq!(hint.old, "colab exec -f train.py");
-        assert_eq!(hint.new, "colab-cli run py");
+        assert_eq!(hint.new, "colab run py");
     }
 
     #[test]

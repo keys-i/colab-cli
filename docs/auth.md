@@ -3,12 +3,12 @@
 Auth lives under `auth`.
 
 ```sh
-colab-cli auth login --method oauth2
-colab-cli auth login --method adc
-colab-cli auth status
-colab-cli auth list
-colab-cli auth logout
-colab-cli auth export-redacted
+colab auth login --method oauth2
+colab auth login --method adc
+colab auth status
+colab auth list
+colab auth logout
+colab auth export-redacted
 ```
 
 OAuth2 is the normal browser login path. Tokens must not be printed in logs, JSON, bug reports, or config.
@@ -16,7 +16,7 @@ OAuth2 is the normal browser login path. Tokens must not be printed in logs, JSO
 ADC support is local detection:
 
 ```sh
-colab-cli auth login --method adc
+colab auth login --method adc
 ```
 
 If ADC credentials are missing, cocli prints:

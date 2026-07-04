@@ -1,19 +1,19 @@
 # UI
 
-`colab-cli` has human output and JSON output.
+`colab` has human output and JSON output.
 
 Interactive terminals get colour and simple prompts only where selection helps:
 
 ```sh
-colab-cli settings
-colab-cli session
+colab settings
+colab session
 ```
 
 Scripts should use explicit commands:
 
 ```sh
-colab-cli status --json
-colab-cli ai tools list --json
+colab status --json
+colab ai tools list --json
 ```
 
 ## Gates
@@ -29,7 +29,7 @@ No animation, colour-only decoration, launcher prompts, or fun lines are printed
 - `COLAB_NO_INTERACTIVE=1` is set
 - `ui.tui = "never"` is configured
 
-Running `colab-cli` with no args prints help. It does not print Quick Actions or command previews.
+Running `colab` with no args prints help. It does not print Quick Actions or command previews.
 
 ## Status
 
@@ -45,7 +45,7 @@ Runtime    · pick a session first
 Files      ✓ cache writable
 Drive      · not checked
 
-fix: run colab-cli session list
+fix: run colab session list
 ```
 
 JSON is only printed with `--json`.

@@ -42,8 +42,8 @@ Default production commands:
 - `run last`
 - `run history`
 - `fs ls`
-- `fs push`
-- `fs pull`
+- `fs upload`
+- `fs download`
 - `fs rm`
 - `fs edit`
 - `fs sync --dry-run`
@@ -69,7 +69,7 @@ Default production commands:
 - `ai`
 - `ai tools list`
 - `ai tools list --json`
-- `ai tools inspect recipe.plan`
+- `ai tools inspect runtime.inspect`
 - `run ast`, gated
 - `ai mcp`, gated
 - `ai plan`, gated
@@ -88,7 +88,7 @@ Default production commands:
 - `settings experiments reset`
 - `settings skills list`
 - `settings skills list --json`
-- `settings skills inspect recipe.plan`
+- `settings skills inspect runtime.inspect`
 - `settings ui get`
 - `settings ui set animations false`
 - `completions bash`

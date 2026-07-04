@@ -30,7 +30,7 @@ No quota-bypass features.
 The command shape is:
 
 ```sh
-colab-cli <space> <command> <flags>
+colab <space> <command> <flags>
 ```
 
 That is a little longer than `colab exec`, but it gives the command tree room to stay readable. The default public spaces are `session`, `run`, `fs`, `status`, `ai`, `auth`, `settings`, and `completions`. Optional `continue` and `distribute` spaces stay hidden until enabled. I collapsed the older `exec`, `env`, `mount`, `runtime`, `tools`, `config`, and `doctor` spaces because they made users remember too many ways to ask the same question.

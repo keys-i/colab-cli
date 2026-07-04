@@ -15,9 +15,9 @@ Both tools use one output rule: human output is short; JSON is machine-only.
 | muted | secondary detail, grey |
 | accent | headings and IDs, violet/blue |
 
-No raw ANSI in JSON. Respect `NO_COLOR`, `--no-color`, `--quiet`, and CI. Persistent colour mode is configured with `colab-cli settings ui set color auto|always|never`.
+No raw ANSI in JSON. Respect `NO_COLOR`, `--no-color`, `--quiet`, and CI. Persistent colour mode is configured with `colab settings ui set color auto|always|never`.
 
-Running `colab-cli` with no args prints help. It does not open a launcher.
+Running `colab` with no args prints help. It does not open a launcher.
 
 Verbose diagnostics use `-v`, `-vv`, and `-vvv`. Debug lines go to stderr, are prefixed with `debug1:`, `debug2:`, or `debug3:`, and are not mixed into JSON stdout.
 

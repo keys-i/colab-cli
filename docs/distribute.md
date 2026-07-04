@@ -3,20 +3,20 @@
 `distribute` is the experimental workflow area. It is off by default.
 
 ```sh
-colab-cli distribute plan
+colab distribute plan
 ```
 
 prints:
 
 ```text
 experimental feature disabled: distribute
-enable: colab-cli settings experiments
+enable: colab settings experiments
 ```
 
 Enable it explicitly:
 
 ```sh
-colab-cli settings experiments set distribute true
+colab settings experiments set distribute true
 ```
 
 Names:
@@ -28,28 +28,28 @@ Names:
 Commands:
 
 ```sh
-colab-cli distribute plan
-colab-cli distribute status
-colab-cli distribute explain
-colab-cli distribute run --dry-run
-colab-cli distribute run --confirm
-colab-cli distribute resume
-colab-cli distribute clean
+colab distribute plan
+colab distribute status
+colab distribute explain
+colab distribute run --dry-run
+colab distribute run --confirm
+colab distribute resume
+colab distribute clean
 
-colab-cli distribute recipe init
-colab-cli distribute recipe check
-colab-cli distribute recipe explain
-colab-cli distribute recipe run --dry-run
-colab-cli distribute recipe run --confirm
+colab distribute recipe init
+colab distribute recipe check
+colab distribute recipe explain
+colab distribute recipe run --dry-run
+colab distribute recipe run --confirm
 
-colab-cli distribute pool plan
-colab-cli distribute pool status
-colab-cli distribute pool cost
-colab-cli distribute pool logs
+colab distribute pool plan
+colab distribute pool status
+colab distribute pool cost
+colab distribute pool logs
 
-colab-cli distribute shard plan
-colab-cli distribute shard run --dry-run
-colab-cli distribute shard resume
+colab distribute shard plan
+colab distribute shard run --dry-run
+colab distribute shard resume
 ```
 
 `cocli.recipe.toml` is preferred. Existing `slurp.toml` files still work as a fallback.

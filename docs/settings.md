@@ -3,13 +3,13 @@
 Settings are local TOML. They live at:
 
 ```sh
-colab-cli settings path
+colab settings path
 ```
 
 Open the sectioned settings view:
 
 ```sh
-colab-cli settings
+colab settings
 ```
 
 In a TTY, `settings`, `settings ui`, and `settings experiments` open the same
@@ -26,16 +26,16 @@ discarding. There is no command preview and no advertised search key.
 Set one key:
 
 ```sh
-colab-cli settings set ui.theme auto
-colab-cli settings ui set color always
-colab-cli settings ui set animations false
-colab-cli settings experiments set distribute true
+colab settings set ui.theme auto
+colab settings ui set color always
+colab settings ui set animations false
+colab settings experiments set distribute true
 ```
 
 Preview terminal colour roles:
 
 ```sh
-colab-cli settings ui preview
+colab settings ui preview
 ```
 
 Default shape:
@@ -91,13 +91,13 @@ enabled = false
 ## UI
 
 ```sh
-colab-cli settings ui
-colab-cli settings ui get color
-colab-cli settings ui set color auto
-colab-cli settings ui set color always
-colab-cli settings ui set color never
-colab-cli settings ui set neon true
-colab-cli settings ui set unicode true
+colab settings ui
+colab settings ui get color
+colab settings ui set color auto
+colab settings ui set color always
+colab settings ui set color never
+colab settings ui set neon true
+colab settings ui set unicode true
 ```
 
 `--no-color` is still available as an emergency one-shot override. Normal colour mode belongs in settings.
@@ -109,7 +109,7 @@ Kernel language and selected kernel metadata are cached in the session store,
 not in UI settings. Refresh them with:
 
 ```sh
-colab-cli session kernel refresh
+colab session kernel refresh
 ```
 
 ## Experiments
@@ -117,20 +117,20 @@ colab-cli session kernel refresh
 Experiments are off by default and saved in `config.toml`.
 
 ```sh
-colab-cli settings experiments
-colab-cli settings experiments get
-colab-cli settings experiments get distribute
-colab-cli settings experiments set continue true
-colab-cli settings experiments set distribute true
-colab-cli settings experiments set ast-observer true
-colab-cli settings experiments reset
+colab settings experiments
+colab settings experiments get
+colab settings experiments get distribute
+colab settings experiments set continue true
+colab settings experiments set distribute true
+colab settings experiments set ast-observer true
+colab settings experiments reset
 ```
 
 Disabled experiments fail with:
 
 ```text
 experimental feature disabled: distribute
-enable: colab-cli settings experiments
+enable: colab settings experiments
 ```
 
 Experiment gates:

@@ -17,7 +17,7 @@ It should make normal Colab work less annoying:
 
 ## What Done Looks Like
 
-- [x] default command space follows `colab-cli <space> <command> <flags>`
+- [x] default command space follows `colab <space> <command> <flags>`
 - [x] default help shows `session`, `run`, `fs`, `status`, `ai`, `auth`, `settings`, and `completions`
 - [x] no-command fallback prints help
 - [x] `continue` is experimental/off by default

@@ -1,6 +1,6 @@
 # QA
 
-- Running `colab-cli` with no args prints help.
+- Running `colab` with no args prints help.
 - Top-level help shows only `session`, `run`, `fs`, `status`, `ai`, `auth`, `settings`, and `completions`.
 - `continue`, `distribute`, `slurp`, `fleet`, `release`, `agent`, `doctor`, `config`, `tools`, `runtime`, `mount`, `exec`, `env`, and `bug-report` stay out of production help.
 - `--color` stays out of normal help; `--no-color` remains.
@@ -25,20 +25,20 @@
 - Kernel list output is aligned and does not print raw debug booleans.
 - `run pkg` routes through active kernel language.
 - `run pip` is blocked when cached active kernel metadata is Julia or R.
-- `run julia` and `run r` parse for their package surfaces.
+- `run julia` and `run r` parser paths remain hidden from normal help unless dynamic kernel-aware help intentionally exposes them.
 - `run --help` uses cached kernel metadata and does not contact Colab.
 - `run repl` uses local line editing and kernel execution; arrow keys do not reach the remote kernel as escape bytes.
-- `echo "print('hello')" | colab-cli run repl` executes once and exits.
+- `echo "print('hello')" | colab run repl` executes once and exits.
 - `run shell` connects through `/colab/tty` where supported and does not assume `/api/terminals`.
-- `echo "echo HELLO" | colab-cli run shell` sends `exit\n` and does not hang.
+- `echo "echo HELLO" | colab run shell` sends `exit\n` and does not hang.
 - Terminal raw mode is restored after shell and settings exits.
 - Old `run install`, `slurp`, and `fleet` aliases stay hidden and print migration hints when used.
-- `NO_COLOR=1 colab-cli status` has no ANSI.
-- `CI=1 colab-cli status check` does not animate or prompt.
+- `NO_COLOR=1 colab status` has no ANSI.
+- `CI=1 colab status check` does not animate or prompt.
 - `session new` keeps the existing prompt flow and renders a concise success card after assignment.
 - Transient Colab assignment errors do not dump HTML unless `--verbose` is passed.
 - `fs drive mount` shows staged progress in interactive terminals and maps kernel/approval failures to short errors.
 - `fs drive mount` maps endpoint/network failures to a staged Drive error and hides raw reqwest text unless `--verbose`.
-- `auth login --method adc`, `auth login --method oauth2`, `status version`, `settings update check`, `settings billing open --dry-run`, `session logs`, and `session kernel restart --help` parse.
+- `auth login --method adc`, `auth login --method oauth2`, `status version`, `update`, `pay --dry-run`, `session logs`, and `session kernel restart --help` parse.
 - Non-TTY output stays plain.
 - Shipyard remains a release tool first; no broad TUI is required for this pass.

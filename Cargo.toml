@@ -4,7 +4,8 @@ version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Keys <70819367+keys-i@users.noreply.github.com>"]
-description = "Google Colab from the terminal with session, exec, fs, continuation, and agent-friendly commands."
+description = "Google Colab from the terminal with sessions, code execution, files, Drive, status, auth, logs, and agent-facing tools."
+default-run = "colab"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/keys-i/colab-cli"
@@ -12,6 +13,7 @@ homepage = "https://github.com/keys-i/colab-cli"
 keywords = ["colab", "google", "cli", "jupyter", "gpu"]
 categories = ["command-line-utilities", "development-tools"]
 build = "build.rs"
+autobins = false
 include = [
     "src/**/*.rs",
     "tests/**/*.rs",
@@ -25,8 +27,12 @@ include = [
 ]
 
 [[bin]]
+name = "colab"
+path = "src/bin/colab.rs"
+
+[[bin]]
 name = "colab-cli"
-path = "src/main.rs"
+path = "src/bin/colab-cli.rs"
 
 [dependencies]
 base64 = "0.22"

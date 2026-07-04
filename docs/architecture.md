@@ -1,6 +1,6 @@
 # Architecture
 
-`colab-cli` is one publishable Rust package.
+`colab` is one publishable Rust package.
 
 Implementation lives under `src/cocli/`, grouped by command space. The public API is intentionally tiny: the binary calls `cocli::cli::dispatch`, and most modules are internal implementation detail.
 

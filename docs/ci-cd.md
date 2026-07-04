@@ -25,7 +25,7 @@ If there are no releasable changes, Shipyard exits with a no-op message instead 
 
 ## Publishing
 
-Publishing runs only for `colab-cli-v*.*.*` tags.
+Publishing runs only for `colab-v*.*.*` tags.
 
 Required secret:
 

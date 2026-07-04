@@ -33,7 +33,7 @@ The release PR job:
 - runs `cargo shipyard update`
 - opens or updates the release PR
 
-The publish job runs only for `colab-cli-v*.*.*` tags. It is the only job that receives `CARGO_REGISTRY_TOKEN`.
+The publish job runs only for `colab-v*.*.*` tags. It is the only job that receives `CARGO_REGISTRY_TOKEN`.
 
 ## Install Source
 
@@ -59,4 +59,4 @@ Local comparison output is written to:
 target/shipyard/comparison-release-plz.md
 ```
 
-Current local result: release-plz was not installed, so release-plz timings are not measured. Shipyard measured the colab-cli plan path locally, but no superiority claim is made from one-sided data.
+Current local result: release-plz was not installed, so release-plz timings are not measured. Shipyard measured the colab plan path locally, but no superiority claim is made from one-sided data.

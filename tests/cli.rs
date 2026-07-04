@@ -6,47 +6,49 @@ use colab_cli::cocli::cli::args::{Cli, Commands, FsCommands, FsDriveCommands};
 #[test]
 fn parses_major_command_spaces() {
     for args in [
-        ["colab-cli", "session", "last"].as_slice(),
-        ["colab-cli", "run", "last", "--confirm"].as_slice(),
-        ["colab-cli", "run", "py", "--code", "print(1)"].as_slice(),
-        ["colab-cli", "run", "code", "--code", "1 + 1"].as_slice(),
-        ["colab-cli", "run", "notebook", "report.ipynb"].as_slice(),
-        ["colab-cli", "run", "repl"].as_slice(),
-        ["colab-cli", "run", "shell"].as_slice(),
-        ["colab-cli", "run", "pkg", "add", "numpy"].as_slice(),
-        ["colab-cli", "run", "pkg", "remove", "numpy"].as_slice(),
-        ["colab-cli", "run", "pkg", "list"].as_slice(),
-        ["colab-cli", "run", "pkg", "status"].as_slice(),
-        ["colab-cli", "run", "pkg", "update", "numpy"].as_slice(),
-        ["colab-cli", "run", "pkg", "restore", "requirements.txt"].as_slice(),
-        ["colab-cli", "run", "pkg", "check"].as_slice(),
-        ["colab-cli", "run", "pip", "install", "torch"].as_slice(),
-        ["colab-cli", "run", "pip", "freeze"].as_slice(),
-        ["colab-cli", "run", "pip", "restore", "requirements.txt"].as_slice(),
-        ["colab-cli", "run", "pip", "check"].as_slice(),
-        ["colab-cli", "run", "pip", "list"].as_slice(),
-        ["colab-cli", "run", "julia", "pkg", "add", "CSV"].as_slice(),
-        ["colab-cli", "run", "julia", "pkg", "status"].as_slice(),
-        ["colab-cli", "run", "julia", "pkg", "instantiate"].as_slice(),
-        ["colab-cli", "run", "julia", "pkg", "precompile"].as_slice(),
-        ["colab-cli", "run", "julia", "pkg", "update"].as_slice(),
-        ["colab-cli", "run", "julia", "pkg", "test"].as_slice(),
-        ["colab-cli", "run", "julia", "pkg", "rm", "CSV"].as_slice(),
-        ["colab-cli", "run", "r", "pkg", "install", "dplyr"].as_slice(),
-        ["colab-cli", "run", "r", "pkg", "list"].as_slice(),
-        ["colab-cli", "run", "r", "pkg", "update"].as_slice(),
-        ["colab-cli", "run", "r", "pkg", "remove", "dplyr"].as_slice(),
-        ["colab-cli", "run", "r", "renv", "restore"].as_slice(),
-        ["colab-cli", "run", "r", "renv", "snapshot"].as_slice(),
-        ["colab-cli", "run", "r", "session-info"].as_slice(),
-        ["colab-cli", "run", "ast", "file.py"].as_slice(),
-        ["colab-cli", "run", "watch", "file.py", "--ast"].as_slice(),
-        ["colab-cli", "run", "install", "torch"].as_slice(),
-        ["colab-cli", "fs", "changed", ".", "/content"].as_slice(),
-        ["colab-cli", "fs", "drive", "mount"].as_slice(),
-        ["colab-cli", "fs", "drive", "mount", "--timeout", "180"].as_slice(),
+        ["colab", "session", "last"].as_slice(),
+        ["colab", "run", "last", "--confirm"].as_slice(),
+        ["colab", "run", "py", "--code", "print(1)"].as_slice(),
+        ["colab", "run", "code", "--code", "1 + 1"].as_slice(),
+        ["colab", "run", "notebook", "report.ipynb"].as_slice(),
+        ["colab", "run", "repl"].as_slice(),
+        ["colab", "run", "shell"].as_slice(),
+        ["colab", "run", "pkg", "add", "numpy"].as_slice(),
+        ["colab", "run", "pkg", "remove", "numpy"].as_slice(),
+        ["colab", "run", "pkg", "list"].as_slice(),
+        ["colab", "run", "pkg", "status"].as_slice(),
+        ["colab", "run", "pkg", "update", "numpy"].as_slice(),
+        ["colab", "run", "pkg", "restore", "requirements.txt"].as_slice(),
+        ["colab", "run", "pkg", "check"].as_slice(),
+        ["colab", "run", "pip", "install", "torch"].as_slice(),
+        ["colab", "run", "pip", "freeze"].as_slice(),
+        ["colab", "run", "pip", "restore", "requirements.txt"].as_slice(),
+        ["colab", "run", "pip", "check"].as_slice(),
+        ["colab", "run", "pip", "list"].as_slice(),
+        ["colab", "run", "julia", "pkg", "add", "CSV"].as_slice(),
+        ["colab", "run", "julia", "pkg", "status"].as_slice(),
+        ["colab", "run", "julia", "pkg", "instantiate"].as_slice(),
+        ["colab", "run", "julia", "pkg", "precompile"].as_slice(),
+        ["colab", "run", "julia", "pkg", "update"].as_slice(),
+        ["colab", "run", "julia", "pkg", "test"].as_slice(),
+        ["colab", "run", "julia", "pkg", "rm", "CSV"].as_slice(),
+        ["colab", "run", "r", "pkg", "install", "dplyr"].as_slice(),
+        ["colab", "run", "r", "pkg", "list"].as_slice(),
+        ["colab", "run", "r", "pkg", "update"].as_slice(),
+        ["colab", "run", "r", "pkg", "remove", "dplyr"].as_slice(),
+        ["colab", "run", "r", "renv", "restore"].as_slice(),
+        ["colab", "run", "r", "renv", "snapshot"].as_slice(),
+        ["colab", "run", "r", "session-info"].as_slice(),
+        ["colab", "run", "ast", "file.py"].as_slice(),
+        ["colab", "run", "watch", "file.py", "--ast"].as_slice(),
+        ["colab", "run", "install", "torch"].as_slice(),
+        ["colab", "fs", "changed", ".", "/content"].as_slice(),
+        ["colab", "fs", "upload", "local.txt", "/content/local.txt"].as_slice(),
+        ["colab", "fs", "download", "/content/out", "./out"].as_slice(),
+        ["colab", "fs", "drive", "mount"].as_slice(),
+        ["colab", "fs", "drive", "mount", "--timeout", "180"].as_slice(),
         [
-            "colab-cli",
+            "colab",
             "fs",
             "drive",
             "mount",
@@ -56,30 +58,30 @@ fn parses_major_command_spaces() {
             "2",
         ]
         .as_slice(),
-        ["colab-cli", "fs", "drive", "status"].as_slice(),
-        ["colab-cli", "fs", "drive", "list"].as_slice(),
-        ["colab-cli", "status", "runtime", "--gpu"].as_slice(),
-        ["colab-cli", "status", "runtime", "--tpu"].as_slice(),
-        ["colab-cli", "status", "runtime", "--versions"].as_slice(),
-        ["colab-cli", "status", "runtime", "--backend"].as_slice(),
-        ["colab-cli", "status", "check"].as_slice(),
-        ["colab-cli", "status", "version"].as_slice(),
-        ["colab-cli", "distribute", "plan"].as_slice(),
-        ["colab-cli", "distribute", "recipe", "explain"].as_slice(),
-        ["colab-cli", "distribute", "pool", "plan"].as_slice(),
-        ["colab-cli", "distribute", "shard", "plan"].as_slice(),
-        ["colab-cli", "slurp", "explain"].as_slice(),
-        ["colab-cli", "fleet", "plan"].as_slice(),
-        ["colab-cli", "settings", "skills", "list"].as_slice(),
-        ["colab-cli", "settings", "skills", "inspect", "recipe.plan"].as_slice(),
-        ["colab-cli", "settings", "skills", "mcp"].as_slice(),
-        ["colab-cli", "settings", "ui", "get"].as_slice(),
-        ["colab-cli", "settings", "ui", "set", "animations", "false"].as_slice(),
-        ["colab-cli", "settings", "ui", "preview"].as_slice(),
-        ["colab-cli", "settings", "experiments"].as_slice(),
-        ["colab-cli", "settings", "experiments", "get"].as_slice(),
+        ["colab", "fs", "drive", "status"].as_slice(),
+        ["colab", "fs", "drive", "list"].as_slice(),
+        ["colab", "status", "runtime", "--gpu"].as_slice(),
+        ["colab", "status", "runtime", "--tpu"].as_slice(),
+        ["colab", "status", "runtime", "--versions"].as_slice(),
+        ["colab", "status", "runtime", "--backend"].as_slice(),
+        ["colab", "status", "check"].as_slice(),
+        ["colab", "status", "version"].as_slice(),
+        ["colab", "distribute", "plan"].as_slice(),
+        ["colab", "distribute", "recipe", "explain"].as_slice(),
+        ["colab", "distribute", "pool", "plan"].as_slice(),
+        ["colab", "distribute", "shard", "plan"].as_slice(),
+        ["colab", "slurp", "explain"].as_slice(),
+        ["colab", "fleet", "plan"].as_slice(),
+        ["colab", "settings", "skills", "list"].as_slice(),
+        ["colab", "settings", "skills", "inspect", "recipe.plan"].as_slice(),
+        ["colab", "settings", "skills", "mcp"].as_slice(),
+        ["colab", "settings", "ui", "get"].as_slice(),
+        ["colab", "settings", "ui", "set", "animations", "false"].as_slice(),
+        ["colab", "settings", "ui", "preview"].as_slice(),
+        ["colab", "settings", "experiments"].as_slice(),
+        ["colab", "settings", "experiments", "get"].as_slice(),
         [
-            "colab-cli",
+            "colab",
             "settings",
             "experiments",
             "set",
@@ -87,39 +89,48 @@ fn parses_major_command_spaces() {
             "true",
         ]
         .as_slice(),
-        ["colab-cli", "settings", "experiments", "reset"].as_slice(),
-        ["colab-cli", "settings", "support", "bug-report"].as_slice(),
-        ["colab-cli", "settings", "about"].as_slice(),
-        ["colab-cli", "settings", "update", "check"].as_slice(),
-        ["colab-cli", "settings", "update", "install", "--yes"].as_slice(),
-        ["colab-cli", "settings", "billing", "open", "--dry-run"].as_slice(),
-        ["colab-cli", "settings", "billing", "status"].as_slice(),
-        ["colab-cli", "ai"].as_slice(),
-        ["colab-cli", "ai", "tools"].as_slice(),
-        ["colab-cli", "ai", "tools", "list"].as_slice(),
-        ["colab-cli", "ai", "tools", "inspect", "recipe.plan"].as_slice(),
-        ["colab-cli", "ai", "ast", "file.py"].as_slice(),
-        ["colab-cli", "ai", "ast", "watch", "file.py"].as_slice(),
-        ["colab-cli", "ai", "mcp"].as_slice(),
-        ["colab-cli", "ai", "mcp", "serve", "--stdio"].as_slice(),
-        ["colab-cli", "ai", "plan", "train a model"].as_slice(),
-        ["colab-cli", "ai", "audit", "plan.toml"].as_slice(),
-        ["colab-cli", "continue", "last"].as_slice(),
-        ["colab-cli", "auth", "login", "--method", "adc"].as_slice(),
-        ["colab-cli", "auth", "login", "--method", "oauth2"].as_slice(),
-        ["colab-cli", "auth", "status"].as_slice(),
-        ["colab-cli", "auth", "list"].as_slice(),
-        ["colab-cli", "session", "refresh"].as_slice(),
-        ["colab-cli", "session", "repair"].as_slice(),
-        ["colab-cli", "session", "reconnect"].as_slice(),
-        ["colab-cli", "session", "logs", "--tail", "50"].as_slice(),
-        ["colab-cli", "session", "kernel", "status"].as_slice(),
-        ["colab-cli", "session", "kernel", "list"].as_slice(),
-        ["colab-cli", "session", "kernel", "current"].as_slice(),
-        ["colab-cli", "session", "kernel", "select", "python3"].as_slice(),
-        ["colab-cli", "session", "kernel", "specs"].as_slice(),
+        ["colab", "settings", "experiments", "reset"].as_slice(),
+        ["colab", "settings", "support", "bug-report"].as_slice(),
+        ["colab", "settings", "about"].as_slice(),
+        ["colab", "settings", "update", "check"].as_slice(),
+        ["colab", "settings", "update", "install", "--yes"].as_slice(),
+        ["colab", "settings", "billing", "open", "--dry-run"].as_slice(),
+        ["colab", "settings", "billing", "status"].as_slice(),
+        ["colab", "log"].as_slice(),
+        ["colab", "log", "list"].as_slice(),
+        ["colab", "log", "show", "--tail", "10"].as_slice(),
+        ["colab", "log", "export", "--format", "md"].as_slice(),
+        ["colab", "log", "tail", "--lines", "10"].as_slice(),
+        ["colab", "update"].as_slice(),
+        ["colab", "update", "--install", "--yes"].as_slice(),
+        ["colab", "version"].as_slice(),
+        ["colab", "pay", "--dry-run"].as_slice(),
+        ["colab", "ai"].as_slice(),
+        ["colab", "ai", "tools"].as_slice(),
+        ["colab", "ai", "tools", "list"].as_slice(),
+        ["colab", "ai", "tools", "inspect", "recipe.plan"].as_slice(),
+        ["colab", "ai", "ast", "file.py"].as_slice(),
+        ["colab", "ai", "ast", "watch", "file.py"].as_slice(),
+        ["colab", "ai", "mcp"].as_slice(),
+        ["colab", "ai", "mcp", "serve", "--stdio"].as_slice(),
+        ["colab", "ai", "plan", "train a model"].as_slice(),
+        ["colab", "ai", "audit", "plan.toml"].as_slice(),
+        ["colab", "continue", "last"].as_slice(),
+        ["colab", "auth", "login", "--method", "adc"].as_slice(),
+        ["colab", "auth", "login", "--method", "oauth2"].as_slice(),
+        ["colab", "auth", "status"].as_slice(),
+        ["colab", "auth", "list"].as_slice(),
+        ["colab", "session", "refresh"].as_slice(),
+        ["colab", "session", "repair"].as_slice(),
+        ["colab", "session", "reconnect"].as_slice(),
+        ["colab", "session", "logs", "--tail", "50"].as_slice(),
+        ["colab", "session", "kernel", "status"].as_slice(),
+        ["colab", "session", "kernel", "list"].as_slice(),
+        ["colab", "session", "kernel", "current"].as_slice(),
+        ["colab", "session", "kernel", "select", "python3"].as_slice(),
+        ["colab", "session", "kernel", "specs"].as_slice(),
         [
-            "colab-cli",
+            "colab",
             "session",
             "kernel",
             "start",
@@ -127,14 +138,14 @@ fn parses_major_command_spaces() {
             "julia-1.10",
         ]
         .as_slice(),
-        ["colab-cli", "session", "kernel", "interrupt"].as_slice(),
-        ["colab-cli", "session", "kernel", "restart", "--yes"].as_slice(),
-        ["colab-cli", "session", "kernel", "shutdown", "--yes"].as_slice(),
-        ["colab-cli", "session", "kernel", "refresh"].as_slice(),
-        ["colab-cli", "status", "kernel", "--all"].as_slice(),
-        ["colab-cli", "status", "kernel", "--refresh"].as_slice(),
-        ["colab-cli", "settings", "path"].as_slice(),
-        ["colab-cli", "settings", "locate"].as_slice(),
+        ["colab", "session", "kernel", "interrupt"].as_slice(),
+        ["colab", "session", "kernel", "restart", "--yes"].as_slice(),
+        ["colab", "session", "kernel", "shutdown", "--yes"].as_slice(),
+        ["colab", "session", "kernel", "refresh"].as_slice(),
+        ["colab", "status", "kernel", "--all"].as_slice(),
+        ["colab", "status", "kernel", "--refresh"].as_slice(),
+        ["colab", "settings", "path"].as_slice(),
+        ["colab", "settings", "locate"].as_slice(),
     ] {
         Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
     }
@@ -142,7 +153,7 @@ fn parses_major_command_spaces() {
 
 #[test]
 fn drive_mount_timeout_default_allows_human_auth() {
-    let cli = Cli::try_parse_from(["colab-cli", "fs", "drive", "mount"]).unwrap();
+    let cli = Cli::try_parse_from(["colab", "fs", "drive", "mount"]).unwrap();
     let Some(Commands::Fs {
         command:
             FsCommands::Drive {
@@ -173,7 +184,11 @@ fn top_level_help_has_final_command_spaces() {
         "status",
         "ai",
         "auth",
+        "log",
         "settings",
+        "update",
+        "version",
+        "pay",
         "completions",
     ] {
         assert!(stdout.contains(name), "{name}");
@@ -201,13 +216,13 @@ fn top_level_help_has_final_command_spaces() {
 
 #[test]
 fn verbose_count_parses_and_caps() {
-    let cli = Cli::try_parse_from(["colab-cli", "-v", "status"]).unwrap();
+    let cli = Cli::try_parse_from(["colab", "-v", "status"]).unwrap();
     assert_eq!(cli.verbose, 1);
-    let cli = Cli::try_parse_from(["colab-cli", "-vv", "status"]).unwrap();
+    let cli = Cli::try_parse_from(["colab", "-vv", "status"]).unwrap();
     assert_eq!(cli.verbose, 2);
-    let cli = Cli::try_parse_from(["colab-cli", "-vvv", "status"]).unwrap();
+    let cli = Cli::try_parse_from(["colab", "-vvv", "status"]).unwrap();
     assert_eq!(cli.verbose, 3);
-    let cli = Cli::try_parse_from(["colab-cli", "--verbose", "--verbose", "status"]).unwrap();
+    let cli = Cli::try_parse_from(["colab", "--verbose", "--verbose", "status"]).unwrap();
     assert_eq!(cli.verbose, 2);
 }
 
@@ -281,14 +296,13 @@ fn verbose_command_names_cover_major_families() {
 #[test]
 fn hidden_aliases_parse_for_one_cycle() {
     for args in [
-        ["colab-cli", "doctor"].as_slice(),
-        ["colab-cli", "runtime", "gpu"].as_slice(),
-        ["colab-cli", "tools", "list"].as_slice(),
-        ["colab-cli", "config", "path"].as_slice(),
-        ["colab-cli", "env", "install", "torch"].as_slice(),
-        ["colab-cli", "exec", "py", "--code", "print(1)"].as_slice(),
-        ["colab-cli", "mount", "drive"].as_slice(),
-        ["colab-cli", "log"].as_slice(),
+        ["colab", "doctor"].as_slice(),
+        ["colab", "runtime", "gpu"].as_slice(),
+        ["colab", "tools", "list"].as_slice(),
+        ["colab", "config", "path"].as_slice(),
+        ["colab", "env", "install", "torch"].as_slice(),
+        ["colab", "exec", "py", "--code", "print(1)"].as_slice(),
+        ["colab", "mount", "drive"].as_slice(),
     ] {
         Cli::try_parse_from(args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
     }
@@ -322,7 +336,7 @@ fn no_command_shows_launcher_fallback_in_non_tty() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("Google Colab from the terminal"));
-    assert!(stdout.contains("Usage: colab-cli [OPTIONS] <COMMAND>"));
+    assert!(stdout.contains("Usage: colab [OPTIONS] <COMMAND>"));
     assert!(!stdout.contains("Quick actions"));
     assert!(!stdout.contains("command preview"));
 }
@@ -340,6 +354,20 @@ fn run_help_uses_generic_kernel_tools_without_cache() {
     assert!(stdout.contains("pkg       Package commands"));
     assert!(stdout.contains("kernel tools adapt"));
     assert!(!stdout.contains("pip       Python package tools"));
+}
+
+#[test]
+fn run_subcommand_help_is_not_intercepted_by_dynamic_run_help() {
+    let home = tempfile::tempdir().unwrap();
+    let out = bin()
+        .env("HOME", home.path())
+        .args(["run", "repl", "--help"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("Usage: colab run repl"));
+    assert!(!stdout.contains("kernel tools adapt"));
 }
 
 #[test]
@@ -373,6 +401,8 @@ fn docs_exist() {
         "docs/logs.md",
         "docs/run.md",
         "docs/kernel.md",
+        "docs/audit/public-vs-experimental.md",
+        "docs/audit/yagni-prune.md",
         "plan.md",
     ] {
         assert!(std::path::Path::new(path).exists(), "{path}");
@@ -402,11 +432,14 @@ fn settings_skills_list_is_catalog_not_debug_rows() {
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("Tool"));
-    assert!(stdout.contains("recipe.plan"));
-    assert!(stdout.contains("recipe.explain"));
-    assert!(stdout.contains("distribute.plan"));
-    assert!(stdout.contains("mcp.tools"));
+    assert!(stdout.contains("runtime.inspect"));
+    assert!(stdout.contains("fs.diff"));
+    assert!(stdout.contains("support.bug-report"));
     assert!(stdout.contains("agent.audit"));
+    assert!(!stdout.contains("recipe.plan"));
+    assert!(!stdout.contains("distribute.plan"));
+    assert!(!stdout.contains("mcp.tools"));
+    assert!(!stdout.contains("ast.outline"));
     assert!(!stdout.contains("continue.resume"));
     assert!(!stdout.contains("session.new"));
     assert!(!stdout.contains("run.python"));
@@ -454,7 +487,7 @@ fn settings_default_renders_sections() {
     assert!(stdout.contains("Experiments"));
     assert!(stdout.contains("AI"));
     assert!(stdout.contains("Auth"));
-    assert!(stdout.contains("Billing"));
+    assert!(!stdout.contains("Billing"));
     assert!(!stdout.contains("Dev"));
     assert!(!stdout.contains("Quick Actions"));
     assert!(!stdout.trim_start().starts_with('{'));
@@ -548,14 +581,15 @@ fn ai_tools_list_is_agent_catalog() {
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("AI tools"));
     assert!(stdout.contains("Agent-facing workflows"));
-    assert!(stdout.contains("recipe.plan"));
-    assert!(stdout.contains("distribute.plan"));
+    assert!(stdout.contains("runtime.inspect"));
     assert!(stdout.contains("fs.changed"));
-    assert!(stdout.contains("ast.outline"));
-    assert!(stdout.contains("mcp.tools"));
+    assert!(stdout.contains("support.bug-report"));
+    assert!(stdout.contains("kernel.list"));
     assert!(stdout.contains("State"));
-    assert!(stdout.contains("gated"));
-    assert!(stdout.contains("off"));
+    assert!(!stdout.contains("recipe.plan"));
+    assert!(!stdout.contains("distribute.plan"));
+    assert!(!stdout.contains("ast.outline"));
+    assert!(!stdout.contains("mcp.tools"));
     assert!(!stdout.contains("continue.resume"));
     assert!(!stdout.contains("session.new"));
     assert!(!stdout.contains("session=false"));
@@ -579,7 +613,7 @@ fn ai_tools_json_is_clean() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["name"] == "recipe.plan")
+            .any(|row| row["name"] == "runtime.inspect")
     );
 }
 
@@ -666,6 +700,18 @@ fn enabled_distribute_status_and_ast_outline_work() {
             .any(|v| v == "Job")
     );
     assert_eq!(value["main_guard"], true);
+
+    let tools = bin()
+        .env("HOME", home.path())
+        .args(["ai", "tools", "list"])
+        .output()
+        .unwrap();
+    assert!(tools.status.success());
+    let tools_stdout = String::from_utf8(tools.stdout).unwrap();
+    assert!(tools_stdout.contains("recipe.plan"));
+    assert!(tools_stdout.contains("distribute.plan"));
+    assert!(tools_stdout.contains("ast.outline"));
+    assert!(!tools_stdout.contains("mcp.tools"));
 }
 
 #[test]
@@ -679,7 +725,7 @@ fn ai_mcp_and_run_are_experiment_gated() {
     assert!(!mcp.status.success());
     let stderr = String::from_utf8(mcp.stderr).unwrap();
     assert!(stderr.contains("experimental feature disabled"));
-    assert!(stderr.contains("enable: colab-cli settings experiments"));
+    assert!(stderr.contains("enable: colab settings experiments"));
 
     let plan = home.path().join("plan.toml");
     std::fs::write(&plan, "confirm_required = true\n").unwrap();
@@ -750,5 +796,5 @@ fn fs_sync_json_dry_run_has_no_human_prefix() {
 }
 
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_colab-cli"))
+    Command::new(env!("CARGO_BIN_EXE_colab"))
 }
