@@ -7694,8 +7694,8 @@ fn open_url(url: &str) -> Result<()> {
     let mut cmd = Command::new("xdg-open");
     #[cfg(target_os = "windows")]
     let mut cmd = {
-        let mut c = Command::new("cmd");
-        c.args(["/C", "start"]);
+        let mut c = Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
         c
     };
     cmd.arg(url);

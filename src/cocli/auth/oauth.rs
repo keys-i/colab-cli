@@ -302,8 +302,8 @@ fn open_browser(url: &str) -> std::result::Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd")
-        .args(["/C", "start", url])
+    std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
         .spawn()
         .map_err(|e| e.to_string())?;
 
